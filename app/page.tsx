@@ -1,68 +1,194 @@
-import Image from "next/image";
+"use client";
+
+import { useState, useCallback } from "react";
+import { PRESET_CHUNKS } from "@/lib/chunks";
+import type { Chunk, PipelineEvent, PipelineRunResult, EvaluationJudgeResult } from "@/types";
+import { GEMINI_MODELS } from "@/types";
+import { ChunkInput } from "@/components/ChunkInput";
+import { PipelineViz } from "@/components/PipelineViz";
+import { MemoryTable } from "@/components/MemoryTable";
+import { MetricsCard } from "@/components/MetricsCard";
+import { BenchmarkPanel } from "@/components/BenchmarkPanel";
+import { Brain, Cpu, Sparkles } from "lucide-react";
 
 export default function Home() {
+  const [chunks, setChunks] = useState<Chunk[]>(PRESET_CHUNKS.map((c) => ({ ...c })));
+  const [selectedModel, setSelectedModel] = useState(GEMINI_MODELS[0].id);
+  const [events, setEvents] = useState<PipelineEvent[]>([]);
+  const [results, setResults] = useState<Partial<Record<string, PipelineRunResult>>>({});
+  const [evaluationJudge, setEvaluationJudge] = useState<EvaluationJudgeResult | null>(null);
+  const [isRunning, setIsRunning] = useState(false);
+  const [activeStage, setActiveStage] = useState<string | null>(null);
+  const [memoryRefresh, setMemoryRefresh] = useState(0);
+
+  const handleEvent = useCallback((event: PipelineEvent) => {
+    if (event.type === "stage_start") {
+      // Clear events when a new pipeline run starts (only on first stage)
+      setEvents((prev) => {
+        const hasComplete = prev.some((e) => e.type === "complete");
+        return hasComplete ? [event] : [...prev, event];
+      });
+    } else {
+      setEvents((prev) => [...prev, event]);
+    }
+  }, []);
+
+  const handleResults = useCallback((r: Partial<Record<string, PipelineRunResult>>) => {
+    setResults(r);
+  }, []);
+
+  const handleRefreshMemories = useCallback(() => {
+    setMemoryRefresh((n) => n + 1);
+  }, []);
+
+  // Build triage results map for ChunkInput display
+  const triageMap: Record<
+    number,
+    {
+      knowledgeProbability?: number;
+      forwardedCount?: number;
+      totalCandidates?: number;
+      worthinessScore?: number;
+      deltaProbability?: number;
+      hasContradiction?: boolean;
+      contradictionProbability?: number;
+      passedGate: boolean;
+    }
+  > = {};
+  for (const event of events) {
+    if (event.type === "chunk_result") {
+      triageMap[event.chunkId] = {
+        knowledgeProbability: event.knowledgeProbability,
+        forwardedCount: event.forwardedCount,
+        totalCandidates: event.totalCandidates,
+        worthinessScore: event.worthinessScore,
+        deltaProbability: event.deltaProbability,
+        hasContradiction: event.hasContradiction,
+        contradictionProbability: event.contradictionProbability,
+        passedGate: event.passedGate,
+      };
+    }
+  }
+
+  const passedCount = Object.values(triageMap).filter((r) => r.passedGate).length;
+  const droppedCount = Object.values(triageMap).filter((r) => !r.passedGate).length;
+
   return (
-    <div className="flex flex-col flex-1 items-center justify-center bg-zinc-50 font-sans dark:bg-black">
-      <main className="flex flex-1 w-full max-w-3xl flex-col items-center justify-between py-32 px-16 bg-white dark:bg-black sm:items-start">
-        <Image
-          className="dark:invert h-5 w-[100px]"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={100}
-          height={20}
-          priority
-        />
-        <div className="flex flex-col items-center gap-6 text-center sm:items-start sm:text-left">
-          <h1 className="max-w-xs text-3xl font-semibold leading-10 tracking-tight text-black dark:text-zinc-50">
-            To get started, edit the{" "}
-            <code className="rounded bg-black/[.06] px-1.5 py-0.5 font-mono text-[0.9em] dark:bg-white/[.08]">
-              page.tsx
-            </code>{" "}
-            file.
-          </h1>
-          <p className="max-w-md text-lg leading-8 text-zinc-600 dark:text-zinc-400">
-            Looking for a starting point or more instructions? Head over to{" "}
-            <a
-              href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Templates
-            </a>{" "}
-            or the{" "}
-            <a
-              href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Learning
-            </a>{" "}
-            center.
-          </p>
+    <div className="min-h-screen bg-[#080808] text-white">
+      {/* Header */}
+      <header className="border-b border-white/8 bg-[#0a0a0a]">
+        <div className="max-w-[1600px] mx-auto px-6 h-14 flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <div className="w-7 h-7 rounded-none bg-fuchsia-500/20 border border-fuchsia-500/30 flex items-center justify-center">
+              <Brain className="w-4 h-4 text-fuchsia-400" />
+            </div>
+            <div>
+              <h1 className="text-sm font-semibold text-white">
+                Jev Memory Benchmark
+              </h1>
+              <p className="text-xs text-white/35 leading-none mt-0.5">
+                TypeSafe AI Parallel Gating × Gemini Memory Evaluator
+              </p>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-4 text-xs text-white/30">
+            <span className="flex items-center gap-1">
+              <span className="w-1.5 h-1.5 rounded-none bg-fuchsia-400"></span>
+              TypeSafe SDK (jev-latest)
+            </span>
+            <span className="flex items-center gap-1">
+              <span className="w-1.5 h-1.5 rounded-none bg-blue-400"></span>
+              {GEMINI_MODELS.find((m) => m.id === selectedModel)?.name ?? selectedModel}
+            </span>
+            <span className="flex items-center gap-1">
+              <Sparkles className="w-3 h-3 text-amber-400" />
+              Judge: gemini-3.1-pro
+            </span>
+            <span className="flex items-center gap-1">
+              <Cpu className="w-3 h-3" />
+              IndexedDB
+            </span>
+          </div>
         </div>
-        <div className="flex flex-col gap-4 text-base font-medium sm:flex-row">
-          <a
-            className="flex h-12 w-full items-center justify-center gap-2 rounded-full bg-foreground px-5 text-background transition-colors hover:bg-[#383838] dark:hover:bg-[#ccc] md:w-[158px]"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <Image
-              className="dark:invert h-[14px] w-4"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={16}
-              height={14}
+      </header>
+
+      {/* Main layout */}
+      <main className="max-w-[1600px] mx-auto px-6 py-5 space-y-4">
+        {/* Top row: Chunks + Pipeline Viz + Controls */}
+        <div className="grid grid-cols-[480px_1fr_320px] gap-4 h-[580px]">
+          {/* Left: Chunk input */}
+          <ChunkInput
+            chunks={chunks}
+            onChange={setChunks}
+            triageResults={triageMap}
+          />
+
+          {/* Center: Pipeline visualizer */}
+          <PipelineViz
+            events={events}
+            isRunning={isRunning}
+            activeStage={activeStage}
+          />
+
+          {/* Right: Controls */}
+          <div className="flex flex-col gap-3">
+            <BenchmarkPanel
+              chunks={chunks}
+              selectedModel={selectedModel}
+              onModelChange={setSelectedModel}
+              onEvent={handleEvent}
+              onResults={handleResults}
+              onEvaluation={setEvaluationJudge}
+              onRefreshMemories={handleRefreshMemories}
+              isRunning={isRunning}
+              setIsRunning={setIsRunning}
+              setActiveStage={setActiveStage}
             />
-            Deploy Now
-          </a>
-          <a
-            className="flex h-12 w-full items-center justify-center rounded-full border border-solid border-black/[.08] px-5 transition-colors hover:border-transparent hover:bg-black/[.04] dark:border-white/[.145] dark:hover:bg-[#1a1a1a] md:w-[158px]"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Documentation
-          </a>
+
+            {/* Quick stats */}
+            <div className="grid grid-cols-2 gap-2">
+              {[
+                { label: "Total Chunks", value: chunks.length, color: "text-white/70" },
+                {
+                  label: "Passed Gate",
+                  value: passedCount,
+                  color: "text-emerald-400",
+                },
+                {
+                  label: "Dropped (0 Tokens)",
+                  value: droppedCount,
+                  color: "text-red-400",
+                },
+                {
+                  label: "Memories Active",
+                  value: results["jev-pipeline"]?.memoriesGenerated ?? "—",
+                  color: "text-fuchsia-400",
+                },
+              ].map(({ label, value, color }) => (
+                <div
+                  key={label}
+                  className="rounded-none border border-white/8 bg-white/2 p-2.5 text-center"
+                >
+                  <div className={`text-lg font-bold font-mono ${color}`}>{value}</div>
+                  <div className="text-xs text-white/40 mt-0.5">{label}</div>
+                </div>
+              ))}
+            </div>
+          </div>
         </div>
+
+        {/* Metrics comparison & Quality Scorecard */}
+        {(Object.keys(results).length > 0 || evaluationJudge) && (
+          <MetricsCard
+            results={results}
+            selectedModel={selectedModel}
+            evaluationJudge={evaluationJudge}
+          />
+        )}
+
+        {/* Memory store */}
+        <MemoryTable refreshTrigger={memoryRefresh} />
       </main>
     </div>
   );
