@@ -84,10 +84,10 @@ export default function Home() {
             </div>
             <div>
               <h1 className="text-sm font-semibold text-white">
-                Jev Memory Benchmark
+                Jev Dreaming Benchmark
               </h1>
               <p className="text-xs text-white/35 leading-none mt-0.5">
-                TypeSafe AI Parallel Gating × Gemini Memory Evaluator
+                Intelligent Memory Formation · Knowledge Graph Construction
               </p>
             </div>
           </div>
@@ -114,7 +114,42 @@ export default function Home() {
       </header>
 
       {/* Main layout */}
-      <main className="max-w-[1600px] mx-auto px-4 sm:px-6 py-4 sm:py-5 space-y-4">
+      <main className="max-w-[1600px] mx-auto px-4 sm:px-6 py-6 sm:py-8 space-y-8">
+        {/* Hero Section */}
+        <div className="flex flex-col gap-4 pb-6 border-b border-white/10">
+          <div className="flex flex-col gap-1.5">
+            <p className="text-xs font-mono text-fuchsia-400/80 tracking-widest uppercase">
+              Dreaming Architecture
+            </p>
+            <h2 className="text-3xl sm:text-7xl font-bold tracking-tight text-white line-height-[-5px]">
+              Intelligent Memory Formation & Knowledge Graph Construction
+            </h2>
+          </div>
+          <p className="text-white/55 max-w-full text-xs sm:text-sm">
+            <span className="text-white/80 font-medium">Dreaming</span> is a three-stage pipeline that mimics how biological memory works — filter, encode, consolidate.
+            Incoming text chunks are first triaged by Jev, a probabilistic classifier that assigns a knowledge score to each chunk and <span className="text-white/80">drops irrelevant noise</span>.
+            Only fact-dense chunks advance to Gemini for memory extraction. Extracted memories are then judged by Jev again — each one is decided to
+            {" "}<span className="text-emerald-400/90 font-medium">Append</span> (new fact),
+            {" "}<span className="text-blue-400/90 font-medium">Extend</span> (link into the knowledge graph), or
+            {" "}<span className="text-amber-400/90 font-medium">Supersede</span> (replace a stale belief).
+            This benchmark measures how that hybrid Jev + Gemini pipeline compares to raw Gemini on speed, token cost, and memory quality.
+          </p>
+          <div className="flex flex-wrap gap-4 text-xs text-white/35">
+            <span className="flex items-center gap-1.5">
+              <span className="w-1.5 h-1.5 bg-fuchsia-400 rounded-none inline-block" />
+              Stage 1 · Jev Triage Gate — filters low-signal chunks
+            </span>
+            <span className="flex items-center gap-1.5">
+              <span className="w-1.5 h-1.5 bg-blue-400 rounded-none inline-block" />
+              Stage 2 · Gemini Extraction — generates structured memories
+            </span>
+            <span className="flex items-center gap-1.5">
+              <span className="w-1.5 h-1.5 bg-amber-400 rounded-none inline-block" />
+              Stage 3 · Jev Mutation Judge — evolves the knowledge graph
+            </span>
+          </div>
+        </div>
+
         {/* Top row: Chunks + Pipeline Viz + Controls */}
         <div className="flex flex-col lg:grid lg:grid-cols-[360px_1fr_300px] xl:grid-cols-[480px_1fr_320px] gap-4 lg:h-[580px]">
           {/* Left: Chunk input */}
