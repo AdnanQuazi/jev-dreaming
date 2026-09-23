@@ -13,6 +13,7 @@
     "@google/generative-ai": "^0.24.1",
     "@types/uuid": "^10.0.0",
     "@typesafe-ai/sdk": "^0.6.0",
+    "@vercel/analytics": "^2.0.1",
     "class-variance-authority": "^0.7.1",
     "cn": "^0.3.0",
     "idb": "^8.0.3",
