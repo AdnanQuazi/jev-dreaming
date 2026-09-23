@@ -178,7 +178,7 @@ export function MetricsCard({ results, selectedModel, evaluationJudge }: Props) 
                         <p className="text-xs text-white/40 uppercase tracking-wider font-semibold">Mutations & Actions</p>
                         {(() => {
                           const supersedeCount = result.mutationResults.filter((r) => r.action === "SUPERSEDE").length;
-                          const linkCount = result.mutationResults.filter((r) => r.action === "LINK").length;
+                          const linkCount = result.mutationResults.filter((r) => r.action === "EXTEND").length;
                           const appendCount = Math.max(0, result.memoriesGenerated - supersedeCount - linkCount);
                           return (
                             <>

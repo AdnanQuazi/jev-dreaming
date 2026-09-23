@@ -135,7 +135,7 @@ export function PipelineViz({ events, isRunning, activeStage }: Props) {
     (e) => e.type === "mutation_result" && e.action === "SUPERSEDE"
   ).length;
   const extendCount = events.filter(
-    (e) => e.type === "mutation_result" && (e.action === "EXTEND" || e.action === "LINK")
+    (e) => e.type === "mutation_result" && e.action === "EXTEND"
   ).length;
 
   return (

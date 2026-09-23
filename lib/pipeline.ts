@@ -71,7 +71,7 @@ export async function runDreamingPipeline(
     const passedChunks = chunks.filter((c) => triageResults.find(r => r.chunkId === c.id)?.passedGate);
 
     if (passedChunks.length === 0) {
-      const emptyResult = buildResult("dreaming-pipeline", stages, triageResults, [], [], runStart, []);
+      const emptyResult = buildResult("dreaming-pipeline", stages, triageResults, [], [], [], runStart, []);
       onEvent({ type: "complete", result: emptyResult });
       return emptyResult;
     }
