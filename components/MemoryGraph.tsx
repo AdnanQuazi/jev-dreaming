@@ -28,21 +28,34 @@ export function MemoryGraph({ memories, links, title = "Knowledge Graph", icon =
   const [dimensions, setDimensions] = useState({ width: 800, height: 400 });
   const [showSuperseded, setShowSuperseded] = useState(false);
 
+  const graphRef = useRef<any>(null);
+
   useEffect(() => {
-    if (containerRef.current) {
-      const { width, height } = containerRef.current.getBoundingClientRect();
-      setDimensions({ width, height: height || 400 });
-    }
-    
-    const handleResize = () => {
+    if (!containerRef.current) return;
+
+    // Measure after a short delay so the container has painted
+    const measure = () => {
       if (containerRef.current) {
         const { width, height } = containerRef.current.getBoundingClientRect();
-        setDimensions({ width, height: height || 400 });
+        if (width > 0) {
+          setDimensions({ width, height: height || 400 });
+        }
       }
     };
-    
-    window.addEventListener("resize", handleResize);
-    return () => window.removeEventListener("resize", handleResize);
+
+    // Initial measure with a small delay to let layout settle
+    const timer = setTimeout(measure, 50);
+
+    // Use ResizeObserver so graph updates when the container itself resizes
+    const ro = new ResizeObserver(measure);
+    ro.observe(containerRef.current);
+
+    window.addEventListener("resize", measure);
+    return () => {
+      clearTimeout(timer);
+      ro.disconnect();
+      window.removeEventListener("resize", measure);
+    };
   }, []);
 
   const graphData = useMemo(() => {
@@ -114,6 +127,8 @@ export function MemoryGraph({ memories, links, title = "Knowledge Graph", icon =
         {graphData.nodes.length > 0 ? (
           <div className="absolute inset-0">
             <ForceGraph2D
+              ref={graphRef}
+              key={graphData.nodes.length}
               width={dimensions.width}
               height={dimensions.height}
               graphData={graphData}
@@ -124,8 +139,18 @@ export function MemoryGraph({ memories, links, title = "Knowledge Graph", icon =
               linkLineDash={(link: any) => link.lineDash}
               linkDirectionalArrowLength={3.5}
               linkDirectionalArrowRelPos={1}
+              enableNodeDrag={true}
+              enableZoomInteraction={true}
+              enablePanInteraction={true}
+              onEngineStop={() => {
+                // After the simulation settles, zoom to fit so all nodes are
+                // within the canvas viewport — this also aligns the hit-test
+                // coordinate system with the visual positions, fixing hover/click.
+                if (graphRef.current) {
+                  graphRef.current.zoomToFit(400, 30);
+                }
+              }}
               onNodeClick={(node: any) => {
-                // Could open a sidebar with details, for now we just rely on tooltips
                 console.log(node);
               }}
               backgroundColor="#0f0f0f"

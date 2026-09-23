@@ -19,12 +19,19 @@ export function MemoryViz({ refreshTrigger, results = {} }: Props) {
 
   const refresh = useCallback(async () => {
     setLoading(true);
+
+    // Safety timeout — never stay stuck in loading longer than 6s
+    const timeout = setTimeout(() => setLoading(false), 6000);
+
     try {
       await seedIfEmpty();
       const [mems, lks] = await Promise.all([getAllMemories(), getAllLinks()]);
       setBaseMemories(mems);
       setBaseLinks(lks);
+    } catch (err) {
+      console.error("MemoryViz refresh error:", err);
     } finally {
+      clearTimeout(timeout);
       setLoading(false);
     }
   }, []);
