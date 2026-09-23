@@ -145,7 +145,7 @@ export function BenchmarkPanel({
 
   return (
     <TooltipProvider delay={100}>
-      <Card className="bg-[#0f0f0f] border-white/10 h-full">
+      <Card className="bg-[#0f0f0f] border-white/10 flex-1">
         <CardHeader className="pb-3">
           <CardTitle className="text-sm font-semibold text-white/80 tracking-wide uppercase flex items-center gap-2">
             <BarChart3 className="w-4 h-4 text-amber-400" />

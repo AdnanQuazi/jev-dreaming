@@ -56,7 +56,7 @@ export function ChunkInput({ chunks, onChange, triageResults = {} }: Props) {
   const clearAll = useCallback(() => onChange([]), [onChange]);
 
   return (
-    <Card className="bg-[#0f0f0f] border-white/10 flex flex-col h-full">
+    <Card className="bg-[#0f0f0f] border-white/10 flex flex-col h-[450px] lg:h-full">
       <CardHeader className="pb-3 flex-none">
         <div className="flex items-center justify-between">
           <CardTitle className="text-sm font-semibold text-white/80 tracking-wide uppercase">

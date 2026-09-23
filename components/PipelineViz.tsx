@@ -139,7 +139,7 @@ export function PipelineViz({ events, isRunning, activeStage }: Props) {
   ).length;
 
   return (
-    <Card className="bg-[#0f0f0f] border-white/10 h-full flex flex-col">
+    <Card className="bg-[#0f0f0f] border-white/10 h-[500px] lg:h-full flex flex-col">
       <CardHeader className="pb-3 flex-none">
         <CardTitle className="text-sm font-semibold text-white/80 tracking-wide uppercase flex items-center gap-2">
           <Zap className="w-4 h-4 text-fuchsia-400" />

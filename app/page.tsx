@@ -77,7 +77,7 @@ export default function Home() {
     <div className="min-h-screen bg-[#080808] text-white">
       {/* Header */}
       <header className="border-b border-white/8 bg-[#0a0a0a]">
-        <div className="max-w-[1600px] mx-auto px-6 h-14 flex items-center justify-between">
+        <div className="max-w-[1600px] mx-auto px-4 sm:px-6 py-3 sm:py-0 h-auto sm:h-14 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 sm:gap-0">
           <div className="flex items-center gap-3">
             <div className="w-7 h-7 rounded-none bg-fuchsia-500/20 border border-fuchsia-500/30 flex items-center justify-center">
               <Brain className="w-4 h-4 text-fuchsia-400" />
@@ -92,7 +92,7 @@ export default function Home() {
             </div>
           </div>
 
-          <div className="flex items-center gap-4 text-xs text-white/30">
+          <div className="flex items-center gap-2 sm:gap-4 text-xs text-white/30 flex-wrap">
             <span className="flex items-center gap-1">
               <span className="w-1.5 h-1.5 rounded-none bg-fuchsia-400"></span>
               TypeSafe SDK (jev-latest)
@@ -114,9 +114,9 @@ export default function Home() {
       </header>
 
       {/* Main layout */}
-      <main className="max-w-[1600px] mx-auto px-6 py-5 space-y-4">
+      <main className="max-w-[1600px] mx-auto px-4 sm:px-6 py-4 sm:py-5 space-y-4">
         {/* Top row: Chunks + Pipeline Viz + Controls */}
-        <div className="grid grid-cols-[480px_1fr_320px] gap-4 h-[580px]">
+        <div className="flex flex-col lg:grid lg:grid-cols-[360px_1fr_300px] xl:grid-cols-[480px_1fr_320px] gap-4 lg:h-[580px]">
           {/* Left: Chunk input */}
           <ChunkInput
             chunks={chunks}
