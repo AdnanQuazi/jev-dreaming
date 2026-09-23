@@ -13,7 +13,7 @@ import { Brain, Cpu, Sparkles } from "lucide-react";
 
 export default function Home() {
   const [chunks, setChunks] = useState<Chunk[]>(PRESET_CHUNKS.map((c) => ({ ...c })));
-  const [selectedModel, setSelectedModel] = useState(GEMINI_MODELS[0].id);
+  const [selectedModel, setSelectedModel] = useState("gemini-3.8-flash");
   const [events, setEvents] = useState<PipelineEvent[]>([]);
   const [results, setResults] = useState<Partial<Record<string, PipelineRunResult>>>({});
   const [evaluationJudge, setEvaluationJudge] = useState<EvaluationJudgeResult | null>(null);
