@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import { Poppins } from "next/font/google";
 import { TooltipProvider } from "@/components/ui/tooltip";
-import { Analytics } from "@vercel/analytics/react";
+import { CSPostHogProvider } from "./providers";
 import "./globals.css";
 
 const poppins = Poppins({ 
@@ -20,8 +20,9 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
   return (
     <html lang="en" className="dark">
       <body className={`${poppins.variable} font-sans antialiased bg-background text-foreground`}>
-        <TooltipProvider>{children}</TooltipProvider>
-        <Analytics />
+        <CSPostHogProvider>
+          <TooltipProvider>{children}</TooltipProvider>
+        </CSPostHogProvider>
       </body>
     </html>
   );

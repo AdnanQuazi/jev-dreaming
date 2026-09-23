@@ -4,6 +4,7 @@ import { useState } from "react";
 import type { Chunk, PipelineRunResult, PipelineEvent, EvaluationJudgeResult } from "@/types";
 import { GEMINI_MODELS } from "@/types";
 import { runDreamingPipeline, runGeminiComparisonPipeline } from "@/lib/pipeline";
+import { usePostHog } from 'posthog-js/react';
 import { runQualityEvaluation } from "@/lib/evaluator";
 import { getActiveMemories } from "@/lib/db";
 import { Button } from "@/components/ui/button";
@@ -59,6 +60,7 @@ export function BenchmarkPanel({
 }: Props) {
   const [error, setError] = useState<string | null>(null);
   const [mode, setMode] = useState<"dreaming" | "full" | null>(null);
+  const posthog = usePostHog();
 
   const handleEvent = (event: PipelineEvent) => {
     onEvent(event);
@@ -80,6 +82,12 @@ export function BenchmarkPanel({
     onEvaluation(null);
 
     try {
+      posthog.capture("Run Pipeline", {
+        mode: "with jev",
+        model: selectedModel,
+        chunkCount: chunks.length,
+      });
+
       const activeMemories = await getActiveMemories();
       const result = await runDreamingPipeline(chunks, selectedModel, handleEvent, true);
       onResults({ "with-jev": result });
@@ -113,6 +121,12 @@ export function BenchmarkPanel({
 
     const allResults: Partial<Record<string, PipelineRunResult>> = {};
     try {
+      posthog.capture("Run Pipeline", {
+        mode: "without jev",
+        model: selectedModel,
+        chunkCount: chunks.length,
+      });
+
       const activeMemories = await getActiveMemories();
 
       // 1. Run Pipeline (With Jev)
