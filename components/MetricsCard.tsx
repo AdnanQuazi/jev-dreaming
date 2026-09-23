@@ -25,18 +25,18 @@ interface Props {
 }
 
 const MODE_LABELS: Record<string, string> = {
-  "jev-pipeline": "Jev + Gemini",
-  "gemini-singleshot": "Gemini Single-shot",
+  "dreaming-pipeline": "Dreaming Pipeline",
+  "gemini-pipeline": "Gemini Pipeline",
 };
 
 const MODE_COLORS: Record<string, string> = {
-  "jev-pipeline": "text-fuchsia-300 border-fuchsia-500/30 bg-fuchsia-500/10",
-  "gemini-singleshot": "text-blue-300 border-blue-500/30 bg-blue-500/10",
+  "dreaming-pipeline": "text-fuchsia-300 border-fuchsia-500/30 bg-fuchsia-500/10",
+  "gemini-pipeline": "text-blue-300 border-blue-500/30 bg-blue-500/10",
 };
 
 const MODE_ICON: Record<string, React.ReactNode> = {
-  "jev-pipeline": <Zap className="w-3.5 h-3.5" />,
-  "gemini-singleshot": <Brain className="w-3.5 h-3.5" />,
+  "dreaming-pipeline": <Zap className="w-3.5 h-3.5" />,
+  "gemini-pipeline": <Brain className="w-3.5 h-3.5" />,
 };
 
 function formatMs(ms: number) {
@@ -50,7 +50,7 @@ function formatCost(cost: number) {
 }
 
 export function MetricsCard({ results, selectedModel, evaluationJudge }: Props) {
-  const modes = ["jev-pipeline", "gemini-singleshot"] as const;
+  const modes = ["dreaming-pipeline", "gemini-pipeline"] as const;
   const availableModes = modes.filter((m) => results[m]);
 
   const modelConfig = GEMINI_MODELS.find((m) => m.id === selectedModel);
@@ -98,7 +98,6 @@ export function MetricsCard({ results, selectedModel, evaluationJudge }: Props) 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             {availableModes.map((mode) => {
               const result = results[mode]!;
-              const isJev = mode === "jev-pipeline";
               const isBestLatency = result.totalLatencyMs === minLatency;
               const isBestCost = result.totalCostUsd === minCost;
 
@@ -180,7 +179,7 @@ export function MetricsCard({ results, selectedModel, evaluationJudge }: Props) 
                         {(() => {
                           const supersedeCount = result.mutationResults.filter((r) => r.action === "SUPERSEDE").length;
                           const linkCount = result.mutationResults.filter((r) => r.action === "LINK").length;
-                          const appendCount = Math.max(0, result.memoriesGenerated - supersedeCount);
+                          const appendCount = Math.max(0, result.memoriesGenerated - supersedeCount - linkCount);
                           return (
                             <>
                               <div className="flex items-center justify-between text-xs">
@@ -195,7 +194,7 @@ export function MetricsCard({ results, selectedModel, evaluationJudge }: Props) 
                               )}
                               {linkCount > 0 && (
                                 <div className="flex items-center justify-between text-xs">
-                                  <span className="text-fuchsia-400/90 font-medium">LINK</span>
+                                  <span className="text-fuchsia-400/90 font-medium">EXTEND / LINK</span>
                                   <span className="font-mono text-fuchsia-400">{linkCount}</span>
                                 </div>
                               )}
@@ -217,26 +216,35 @@ export function MetricsCard({ results, selectedModel, evaluationJudge }: Props) 
           </div>
 
           {/* Efficiency advantage banner */}
-          {availableModes.length >= 2 && results["jev-pipeline"] && results["gemini-singleshot"] && (
+          {availableModes.length >= 2 && results["dreaming-pipeline"] && results["gemini-pipeline"] && (
             <div className="mt-4 p-3.5 rounded-none bg-white/3 border border-white/8 flex items-center justify-between flex-wrap gap-3">
               <div className="flex items-center gap-2">
                 <TrendingDown className="w-4 h-4 text-emerald-400" />
-                <span className="text-sm font-semibold text-white/80">Jev + Gemini Architecture Comparison</span>
+                <span className="text-sm font-semibold text-white/80">Dreaming Architecture Comparison</span>
               </div>
-              <div className="flex items-center gap-4 text-sm font-mono">
-                <div>
-                  <span className="text-white/40 text-xs mr-1">Speed:</span>
-                  <span className="text-emerald-400 font-bold">
-                    {(results["gemini-singleshot"]!.totalLatencyMs / results["jev-pipeline"]!.totalLatencyMs).toFixed(1)}×
-                  </span>
-                  <span className="text-white/40 text-xs ml-0.5">relative latency</span>
-                </div>
-                <div>
-                  <span className="text-white/40 text-xs mr-1">Cost:</span>
-                  <span className="text-emerald-400 font-bold">
-                    {formatCost(results["jev-pipeline"]!.totalCostUsd)} vs {formatCost(results["gemini-singleshot"]!.totalCostUsd)}
-                  </span>
-                </div>
+              <div className="flex items-center gap-4 text-sm font-mono text-emerald-400 font-bold">
+                {(() => {
+                  const jevLat = results["dreaming-pipeline"]!.totalLatencyMs;
+                  const gemLat = results["gemini-pipeline"]!.totalLatencyMs;
+                  const speedFactor = gemLat / jevLat;
+                  const speedText = speedFactor >= 1 
+                    ? `${speedFactor.toFixed(1)}x faster` 
+                    : `${(1 / speedFactor).toFixed(1)}x slower`;
+
+                  const jevCost = results["dreaming-pipeline"]!.totalCostUsd;
+                  const gemCost = results["gemini-pipeline"]!.totalCostUsd;
+                  const costFactor = gemCost / jevCost;
+                  const costText = costFactor >= 1 
+                    ? `${costFactor.toFixed(1)}x cheaper` 
+                    : `${(1 / costFactor).toFixed(1)}x more expensive`;
+
+                  return (
+                    <>
+                      <span>Speed - {speedText}</span>
+                      <span>Cost - {costText}</span>
+                    </>
+                  );
+                })()}
               </div>
             </div>
           )}
@@ -273,32 +281,16 @@ export function MetricsCard({ results, selectedModel, evaluationJudge }: Props) 
                 <div className="p-3.5 border border-fuchsia-500/20 bg-fuchsia-950/10 space-y-3">
                   <div className="flex items-center justify-between">
                     <span className="text-sm font-semibold text-fuchsia-300 flex items-center gap-1.5">
-                      <Zap className="w-3.5 h-3.5" /> Jev + Gemini Quality
+                      <Zap className="w-3.5 h-3.5" /> Dreaming Pipeline Quality
                     </span>
                     <span className="text-xl font-bold font-mono text-fuchsia-400">
                       {evaluationJudge.jevEvaluation.overallScore.toFixed(1)}/10
                     </span>
                   </div>
                   <div className="space-y-1.5 text-xs">
-                    <QualityScoreRow label="Fact Completeness" score={evaluationJudge.jevEvaluation.completenessScore} />
-                    <QualityScoreRow label="Noise Filtration" score={evaluationJudge.jevEvaluation.noiseFiltrationScore} />
-                    <QualityScoreRow label="Overall Mutation Accuracy" score={evaluationJudge.jevEvaluation.mutationAccuracyScore} />
-                    {evaluationJudge.jevEvaluation.appendAccuracyScore !== undefined && (
-                      <div className="grid grid-cols-3 gap-1.5 pt-1 text-[10px] font-mono text-white/50 border-t border-white/5">
-                        <div className="bg-white/5 p-1 rounded-none text-center">
-                          <span className="block text-white/30 text-[9px]">APPEND</span>
-                          <span className="text-white/80 font-bold">{evaluationJudge.jevEvaluation.appendAccuracyScore}/10</span>
-                        </div>
-                        <div className="bg-white/5 p-1 rounded-none text-center">
-                          <span className="block text-white/30 text-[9px]">SUPERSEDE</span>
-                          <span className="text-white/80 font-bold">{evaluationJudge.jevEvaluation.supersedeAccuracyScore}/10</span>
-                        </div>
-                        <div className="bg-white/5 p-1 rounded-none text-center">
-                          <span className="block text-white/30 text-[9px]">LINK</span>
-                          <span className="text-white/80 font-bold">{evaluationJudge.jevEvaluation.linkAccuracyScore}/10</span>
-                        </div>
-                      </div>
-                    )}
+                    <QualityScoreRow label="Chunk Classification" score={evaluationJudge.jevEvaluation.chunkClassificationScore} />
+                    <QualityScoreRow label="Memory Generation" score={evaluationJudge.jevEvaluation.memoryGenerationScore} />
+                    <QualityScoreRow label="Mutation Accuracy" score={evaluationJudge.jevEvaluation.mutationAccuracyScore} />
                   </div>
                   <p className="text-xs text-white/60 italic border-t border-white/8 pt-2">
                     "{evaluationJudge.jevEvaluation.critique}"
@@ -310,32 +302,16 @@ export function MetricsCard({ results, selectedModel, evaluationJudge }: Props) 
                 <div className="p-3.5 border border-blue-500/20 bg-blue-950/10 space-y-3">
                   <div className="flex items-center justify-between">
                     <span className="text-sm font-semibold text-blue-300 flex items-center gap-1.5">
-                      <Brain className="w-3.5 h-3.5" /> Gemini Single-shot Quality
+                      <Brain className="w-3.5 h-3.5" /> Gemini Pipeline Quality
                     </span>
                     <span className="text-xl font-bold font-mono text-blue-400">
                       {evaluationJudge.singleShotEvaluation.overallScore.toFixed(1)}/10
                     </span>
                   </div>
                   <div className="space-y-1.5 text-xs">
-                    <QualityScoreRow label="Fact Completeness" score={evaluationJudge.singleShotEvaluation.completenessScore} />
-                    <QualityScoreRow label="Noise Filtration" score={evaluationJudge.singleShotEvaluation.noiseFiltrationScore} />
-                    <QualityScoreRow label="Overall Mutation Accuracy" score={evaluationJudge.singleShotEvaluation.mutationAccuracyScore} />
-                    {evaluationJudge.singleShotEvaluation.appendAccuracyScore !== undefined && (
-                      <div className="grid grid-cols-3 gap-1.5 pt-1 text-[10px] font-mono text-white/50 border-t border-white/5">
-                        <div className="bg-white/5 p-1 rounded-none text-center">
-                          <span className="block text-white/30 text-[9px]">APPEND</span>
-                          <span className="text-white/80 font-bold">{evaluationJudge.singleShotEvaluation.appendAccuracyScore}/10</span>
-                        </div>
-                        <div className="bg-white/5 p-1 rounded-none text-center">
-                          <span className="block text-white/30 text-[9px]">SUPERSEDE</span>
-                          <span className="text-white/80 font-bold">{evaluationJudge.singleShotEvaluation.supersedeAccuracyScore}/10</span>
-                        </div>
-                        <div className="bg-white/5 p-1 rounded-none text-center">
-                          <span className="block text-white/30 text-[9px]">LINK</span>
-                          <span className="text-white/80 font-bold">{evaluationJudge.singleShotEvaluation.linkAccuracyScore}/10</span>
-                        </div>
-                      </div>
-                    )}
+                    <QualityScoreRow label="Chunk Classification" score={evaluationJudge.singleShotEvaluation.chunkClassificationScore} />
+                    <QualityScoreRow label="Memory Generation" score={evaluationJudge.singleShotEvaluation.memoryGenerationScore} />
+                    <QualityScoreRow label="Mutation Accuracy" score={evaluationJudge.singleShotEvaluation.mutationAccuracyScore} />
                   </div>
                   <p className="text-xs text-white/60 italic border-t border-white/8 pt-2">
                     "{evaluationJudge.singleShotEvaluation.critique}"
@@ -360,7 +336,8 @@ export function MetricsCard({ results, selectedModel, evaluationJudge }: Props) 
   );
 }
 
-function QualityScoreRow({ label, score }: { label: string; score: number }) {
+function QualityScoreRow({ label, score }: { label: string; score?: number }) {
+  if (score === undefined) return null;
   const pct = Math.min(100, Math.max(0, (score / 10) * 100));
   return (
     <div className="space-y-1">

@@ -6,7 +6,7 @@ import type { Chunk, PipelineEvent, PipelineRunResult, EvaluationJudgeResult } f
 import { GEMINI_MODELS } from "@/types";
 import { ChunkInput } from "@/components/ChunkInput";
 import { PipelineViz } from "@/components/PipelineViz";
-import { MemoryTable } from "@/components/MemoryTable";
+import { MemoryViz } from "@/components/MemoryViz";
 import { MetricsCard } from "@/components/MetricsCard";
 import { BenchmarkPanel } from "@/components/BenchmarkPanel";
 import { Brain, Cpu, Sparkles } from "lucide-react";
@@ -103,7 +103,7 @@ export default function Home() {
             </span>
             <span className="flex items-center gap-1">
               <Sparkles className="w-3 h-3 text-amber-400" />
-              Judge: gemini-3.1-pro
+              Judge: gemini-3.8-flash
             </span>
             <span className="flex items-center gap-1">
               <Cpu className="w-3 h-3" />
@@ -162,7 +162,7 @@ export default function Home() {
                 },
                 {
                   label: "Memories Active",
-                  value: results["jev-pipeline"]?.memoriesGenerated ?? "—",
+                  value: results["dreaming-pipeline"]?.memoriesGenerated ?? "—",
                   color: "text-fuchsia-400",
                 },
               ].map(({ label, value, color }) => (
@@ -188,7 +188,7 @@ export default function Home() {
         )}
 
         {/* Memory store */}
-        <MemoryTable refreshTrigger={memoryRefresh} />
+        <MemoryViz refreshTrigger={memoryRefresh} results={results} />
       </main>
     </div>
   );

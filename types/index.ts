@@ -2,9 +2,9 @@
 // Memory types
 // ─────────────────────────────────────────────
 
-export type MemoryType = "semantic" | "episodic" | "procedural";
+export type MemoryType = "semantic" | "episodic" | "procedural" | "fact" | "preference";
 export type MemoryStatus = "active" | "superseded";
-export type MutationAction = "APPEND" | "SUPERSEDE" | "LINK";
+export type MutationAction = "APPEND" | "EXTEND" | "SUPERSEDE" | "UNRELATED";
 
 export interface Memory {
   id: string;
@@ -56,14 +56,6 @@ export interface JevTriageResult {
   knowledgeProbability: number; // 0.0 to 1.0 from contains_memorable_knowledge.noul
   passedGate: boolean; // knowledgeProbability >= 0.4
   reason: string;
-  candidateMemoryIds: string[];
-  forwardedMemoryIds: string[];
-  memoryRelations?: Record<string, MemoryRelationResult>; // memoryId -> result
-  // Optional backward compatibility fields
-  worthinessScore?: number;
-  deltaProbability?: number;
-  hasContradiction?: boolean;
-  contradictionProbability?: number;
 }
 
 export interface JevMutationResult {
@@ -74,36 +66,19 @@ export interface JevMutationResult {
 }
 
 // ─────────────────────────────────────────────
-// Pipeline Configuration Options
-// ─────────────────────────────────────────────
-
-export interface PipelineOptions {
-  mutationStrategy: "jev" | "gemini";
-  gateMemories: boolean; // true = only send Jev-related memories; false = send all candidate memories
-}
-
-export const DEFAULT_PIPELINE_OPTIONS: PipelineOptions = {
-  mutationStrategy: "jev",
-  gateMemories: true,
-};
-
-// ─────────────────────────────────────────────
 // Per-Chunk Diagnostic & Evaluation Alignment Context
 // ─────────────────────────────────────────────
 
 export interface ChunkDiagnosticContext {
   chunkId: number;
   chunkText: string;
-  candidateMemories: Array<{ id: string; content: string; type: MemoryType }>;
-  forwardedMemoryIds: string[];
-  relationChoices?: Record<string, "related" | "unrelated">;
   passedGate: boolean;
   extractedMemory?: { content: string; type: MemoryType; confidence: number };
-  resolvedMutation?: {
+  resolvedMutations?: Array<{
     action: MutationAction;
     targetMemoryId?: string;
     targetMemoryContent?: string;
-  };
+  }>;
 }
 
 // ─────────────────────────────────────────────
@@ -124,12 +99,9 @@ export interface ExtractedMemory {
 // ─────────────────────────────────────────────
 
 export interface QualityScorecard {
-  completenessScore: number; // 1-10: preserved facts from worthy chunks
-  noiseFiltrationScore: number; // 1-10: dropped greetings/filler
-  mutationAccuracyScore: number; // 1-10: overall mutation correctness
-  appendAccuracyScore?: number; // 1-10: correct new fact append without false overwrite/duplication
-  supersedeAccuracyScore?: number; // 1-10: correct supersession of outdated/conflicting facts
-  linkAccuracyScore?: number; // 1-10: correct linking of complementary non-conflicting facts
+  chunkClassificationScore: number; // 1-10: correct chunks dropped
+  memoryGenerationScore: number; // 1-10: extracted memories factual and correct
+  mutationAccuracyScore: number; // 1-10: correct mutation operations
   overallScore: number; // 1-10
   critique: string;
 }
@@ -138,7 +110,7 @@ export interface EvaluationJudgeResult {
   jevEvaluation?: QualityScorecard;
   singleShotEvaluation?: QualityScorecard;
   comparisonSummary?: string;
-  winner?: "jev-pipeline" | "gemini-singleshot" | "tie";
+  winner?: "dreaming-pipeline" | "gemini-pipeline" | "tie";
   evaluatorModel: string;
   latencyMs: number;
 }
@@ -172,7 +144,7 @@ export type PipelineEvent =
 // Pipeline run types
 // ─────────────────────────────────────────────
 
-export type PipelineMode = "jev-pipeline" | "gemini-singleshot";
+export type PipelineMode = "dreaming-pipeline" | "gemini-pipeline";
 
 export interface StageMetrics {
   name: string;
@@ -192,8 +164,8 @@ export interface PipelineRunResult {
   chunksProcessed: number;
   triageResults: JevTriageResult[];
   extractedMemories: Memory[];
+  generatedLinks: MemoryLink[];
   mutationResults: JevMutationResult[];
-  pipelineOptions?: PipelineOptions;
   chunkDiagnostics?: ChunkDiagnosticContext[];
   evaluation?: QualityScorecard;
   timestamp: number;

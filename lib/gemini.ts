@@ -1,107 +1,99 @@
-import type { Chunk, Memory, ExtractedMemory, MemoryType, MutationAction } from "@/types";
+import type { Chunk, Memory, ExtractedMemory, MemoryType, MutationAction, JevMutationResult } from "@/types";
 
-// ─── Gemini extraction call (via Next.js route handler) ───────────────────────
+// ─── Stage 2: Batch Memory Extraction ────────────────────────────────────────
 
-export async function extractMemoryWithGemini(
-  chunk: Chunk,
-  relatedMemories: Memory[],
-  model: string,
-  mutationStrategy: "jev" | "gemini" = "jev"
-): Promise<{
-  extraction: ExtractedMemory | null;
-  inputTokens: number;
-  outputTokens: number;
-  latencyMs: number;
-}> {
-  const start = Date.now();
-  const res = await fetch("/api/gemini", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      chunk: chunk.text,
-      chunkId: chunk.id,
-      relatedMemories: relatedMemories.map((m) => ({
-        id: m.id,
-        content: m.content,
-        type: m.type,
-      })),
-      model,
-      mode: "extract",
-      mutationStrategy,
-    }),
-  });
-  const latencyMs = Date.now() - start;
-  if (!res.ok) {
-    const err = await res.text();
-    throw new Error(`Gemini API error ${res.status}: ${err}`);
-  }
-  const data = (await res.json()) as {
-    extraction: {
-      content: string;
-      type: MemoryType;
-      confidence: number;
-      suggestedAction?: MutationAction;
-      targetMemoryId?: string;
-    } | null;
-    inputTokens: number;
-    outputTokens: number;
-  };
-  const extraction: ExtractedMemory | null = data.extraction
-    ? {
-        content: data.extraction.content,
-        type: data.extraction.type,
-        confidence: data.extraction.confidence,
-        chunkId: chunk.id,
-        suggestedAction: data.extraction.suggestedAction,
-        targetMemoryId: data.extraction.targetMemoryId,
-      }
-    : null;
-  return { extraction, inputTokens: data.inputTokens, outputTokens: data.outputTokens, latencyMs };
-}
-
-// ─── Gemini Single-shot (Monolithic all-in-one prompt) ───────────────────────
-
-export async function runGeminiSingleShot(
+export async function extractMemoriesFromChunks(
   chunks: Chunk[],
-  existingMemories: Memory[],
   model: string
 ): Promise<{
   memories: ExtractedMemory[];
-  filteredChunkIds: number[];
   inputTokens: number;
   outputTokens: number;
   latencyMs: number;
 }> {
-  const start = Date.now();
+  if (chunks.length === 0) {
+    return { memories: [], inputTokens: 0, outputTokens: 0, latencyMs: 0 };
+  }
+
+  const start = performance.now();
   const res = await fetch("/api/gemini", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
-      chunks: chunks.map((c) => ({ id: c.id, text: c.text })),
-      existingMemories: existingMemories.map((m) => ({
-        id: m.id,
-        content: m.content,
-        type: m.type,
-      })),
+      chunks: chunks.map(c => ({ id: c.id, text: c.text })),
       model,
-      mode: "singleshot",
+      mode: "batch-extract"
     }),
   });
-  const latencyMs = Date.now() - start;
-  if (!res.ok) throw new Error(`Gemini singleshot error ${res.status}`);
+  const latencyMs = performance.now() - start;
+
+  if (!res.ok) {
+    const err = await res.text();
+    throw new Error(`Gemini batch-extract error ${res.status}: ${err}`);
+  }
+
   const data = await res.json();
+  const memories: ExtractedMemory[] = (data.memories || []).map((m: any) => ({
+    content: m.content,
+    type: m.type as MemoryType,
+    confidence: m.confidence,
+    chunkId: m.chunkId
+  }));
+
   return {
-    memories: (data.memories || []).map((m: any) => ({
-      content: m.content,
-      type: m.type as MemoryType,
-      confidence: m.confidence,
-      chunkId: m.chunkId,
-      suggestedAction: m.suggestedAction as MutationAction,
-      targetMemoryId: m.targetMemoryId,
-    })),
-    filteredChunkIds: data.filteredChunkIds || [],
+    memories,
     inputTokens: data.inputTokens ?? 0,
     outputTokens: data.outputTokens ?? 0,
-    latencyMs,
+    latencyMs
+  };
+}
+
+// ─── Stage 3: Gemini Mutation Judge (for Compare mode) ───────────────────────
+
+export async function runGeminiMutationJudge(
+  newMem: { id: string; content: string },
+  existingMemories: Memory[],
+  model: string
+): Promise<{
+  results: JevMutationResult[];
+  inputTokens: number;
+  outputTokens: number;
+  latencyMs: number;
+}> {
+  if (existingMemories.length === 0) {
+    return { results: [], inputTokens: 0, outputTokens: 0, latencyMs: 0 };
+  }
+
+  const start = performance.now();
+  const res = await fetch("/api/gemini", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      newMemory: newMem,
+      existingMemories: existingMemories.map(m => ({ id: m.id, content: m.content })),
+      model,
+      mode: "gemini-mutation"
+    }),
+  });
+  const latencyMs = performance.now() - start;
+
+  if (!res.ok) {
+    const err = await res.text();
+    throw new Error(`Gemini mutation error ${res.status}: ${err}`);
+  }
+
+  const data = await res.json();
+  const results: JevMutationResult[] = (data.results || []).map((r: any) => ({
+    newMemoryId: newMem.id,
+    existingMemoryId: r.existingMemoryId,
+    action: r.action as MutationAction,
+    confidence: r.confidence ?? 0.85
+  }));
+
+  return {
+    results,
+    inputTokens: data.inputTokens ?? 0,
+    outputTokens: data.outputTokens ?? 0,
+    latencyMs
   };
 }

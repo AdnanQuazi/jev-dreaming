@@ -8,35 +8,17 @@ const EVALUATOR_MODEL = "gemini-3.8-flash";
 const scorecardSchema: Schema = {
   type: SchemaType.OBJECT,
   properties: {
-    completenessScore: {
+    chunkClassificationScore: {
       type: SchemaType.INTEGER,
-      description:
-        "Score 1-10 on capturing all important durable facts from worthy chunks without omissions.",
+      description: "Score 1-10 on correctly filtering out boilerplate/noise and passing meaningful chunks.",
     },
-    noiseFiltrationScore: {
+    memoryGenerationScore: {
       type: SchemaType.INTEGER,
-      description:
-        "Score 1-10 on correctly rejecting conversational noise, filler, greetings, and trivial comments.",
+      description: "Score 1-10 on capturing all important durable facts accurately without omissions.",
     },
     mutationAccuracyScore: {
       type: SchemaType.INTEGER,
-      description:
-        "Score 1-10 on overall mutation accuracy across append, supersede, and link actions.",
-    },
-    appendAccuracyScore: {
-      type: SchemaType.INTEGER,
-      description:
-        "Score 1-10 on accurately appending genuinely new facts without creating redundant duplicates or false overwrites.",
-    },
-    supersedeAccuracyScore: {
-      type: SchemaType.INTEGER,
-      description:
-        "Score 1-10 on correctly identifying outdated or superseded facts (e.g. auth migration, launch updates, policy changes) and targeting the exact right existing memory.",
-    },
-    linkAccuracyScore: {
-      type: SchemaType.INTEGER,
-      description:
-        "Score 1-10 on appropriately linking related non-conflicting facts covering the same entity/topic instead of overwriting.",
+      description: "Score 1-10 on overall mutation accuracy across Append, Extend, Supersede, and Unrelated actions.",
     },
     overallScore: {
       type: SchemaType.NUMBER,
@@ -44,17 +26,13 @@ const scorecardSchema: Schema = {
     },
     critique: {
       type: SchemaType.STRING,
-      description:
-        "Concise qualitative critique (2-4 sentences) detailing strengths, specific errors, missed facts, or wrong mutations.",
+      description: "Concise qualitative critique (2-4 sentences) detailing strengths, specific errors, missed facts, or wrong mutations.",
     },
   },
   required: [
-    "completenessScore",
-    "noiseFiltrationScore",
+    "chunkClassificationScore",
+    "memoryGenerationScore",
     "mutationAccuracyScore",
-    "appendAccuracyScore",
-    "supersedeAccuracyScore",
-    "linkAccuracyScore",
     "overallScore",
     "critique",
   ],
@@ -67,13 +45,12 @@ const evaluationJudgeSchema: Schema = {
     singleShotEvaluation: { ...scorecardSchema, nullable: true },
     comparisonSummary: {
       type: SchemaType.STRING,
-      description:
-        "Comparative breakdown comparing the approaches on accuracy, detail retention, and deduplication.",
+      description: "Comparative breakdown comparing the approaches on accuracy, detail retention, and deduplication.",
     },
     winner: {
       type: SchemaType.STRING,
       format: "enum",
-      enum: ["jev-pipeline", "gemini-singleshot", "tie"],
+      enum: ["dreaming-pipeline", "gemini-pipeline", "tie"],
       description: "Overall winning approach.",
     },
   },
@@ -92,33 +69,13 @@ ${result.mutationResults.map((r) => `  * ${r.action} -> target: [${r.existingMem
 
   return result.chunkDiagnostics
     .map((cd) => {
-      const candidatesFormatted =
-        cd.candidateMemories.length > 0
-          ? cd.candidateMemories
-              .map(
-                (m) =>
-                  `    - [${m.id}] [${m.type}] "${m.content}" -> Jev Gating Decision: ${
-                    cd.relationChoices?.[m.id] ? cd.relationChoices[m.id].toUpperCase() : "FORWARDED"
-                  }`
-              )
-              .join("\n")
-          : "    (None / Cold start)";
-
-      const mutationFormatted = cd.resolvedMutation
-        ? `${cd.resolvedMutation.action}${
-            cd.resolvedMutation.targetMemoryId
-              ? ` targeting [${cd.resolvedMutation.targetMemoryId}: "${cd.resolvedMutation.targetMemoryContent || ""}"]`
-              : " (independent new entry inserted into database)"
-          }`
-        : cd.passedGate && cd.extractedMemory
-        ? "APPEND (independent new entry inserted into database)"
-        : "None (Chunk dropped by triage gate)";
+      const mutationFormatted = cd.resolvedMutations && cd.resolvedMutations.length > 0
+        ? cd.resolvedMutations.map(m => `${m.action} -> [${m.targetMemoryId}: "${m.targetMemoryContent || ""}"]`).join(", ")
+        : (cd.passedGate && cd.extractedMemory ? "APPEND (independent new entry inserted into database)" : "None (Chunk dropped by classifier)");
 
       return `[Chunk ${cd.chunkId}]
 Text: """${cd.chunkText}"""
-Candidate Existing Memories Evaluated:
-${candidatesFormatted}
-Triage Gate: ${cd.passedGate ? "PASSED" : "DROPPED (Noise/Filler)"}
+Classifier Gate: ${cd.passedGate ? "PASSED" : "DROPPED (Boilerplate/Noise)"}
 ${cd.extractedMemory ? `Extracted Memory: [${cd.extractedMemory.type}] "${cd.extractedMemory.content}"` : "Extracted Memory: None"}
 Resolved Mutation: ${mutationFormatted}`;
     })
@@ -134,13 +91,13 @@ export async function POST(req: NextRequest) {
     const {
       chunks,
       existingMemories = [],
-      jevResult,
-      singleShotResult,
+      dreamingResult,
+      geminiResult,
     }: {
       chunks: Chunk[];
       existingMemories: Memory[];
-      jevResult?: PipelineRunResult;
-      singleShotResult?: PipelineRunResult;
+      dreamingResult?: PipelineRunResult;
+      geminiResult?: PipelineRunResult;
     } = await req.json();
 
     const genAI = new GoogleGenerativeAI(GEMINI_API_KEY);
@@ -161,47 +118,43 @@ Existing Database Memories (Before Ingestion):
 ${existingMemories.map((m) => `- [ID: ${m.id}] [${m.type}] ${m.content}`).join("\n")}
 
 ${
-  jevResult
+  dreamingResult
     ? `
-=== PIPELINE A: Jev + Gemini Pipeline Results ===
-Configuration: Mutation Strategy = ${jevResult.pipelineOptions?.mutationStrategy || "jev"}, Memory Gating = ${
-        jevResult.pipelineOptions?.gateMemories ? "Jev Gated" : "All Candidates"
-      }
-Summary: ${jevResult.memoriesGenerated} memories generated, ${jevResult.chunksFiltered} chunks dropped.
+=== PIPELINE A: Dreaming Pipeline Results ===
+Summary: ${dreamingResult.memoriesGenerated} memories generated, ${dreamingResult.chunksFiltered} chunks dropped.
 
 Per-Chunk Execution Details & Alignments:
-${formatPipelineDiagnostics(jevResult)}
+${formatPipelineDiagnostics(dreamingResult)}
 `
-    : "(Pipeline A Jev not provided)"
+    : "(Pipeline A Dreaming not provided)"
 }
 
 ${
-  singleShotResult
+  geminiResult
     ? `
-=== PIPELINE B: Gemini Single-shot Results ===
-Summary: ${singleShotResult.memoriesGenerated} memories generated, ${singleShotResult.chunksFiltered} chunks dropped.
+=== PIPELINE B: Gemini Pipeline Results ===
+Summary: ${geminiResult.memoriesGenerated} memories generated, ${geminiResult.chunksFiltered} chunks dropped.
 
 Per-Chunk Execution Details & Alignments:
-${formatPipelineDiagnostics(singleShotResult)}
+${formatPipelineDiagnostics(geminiResult)}
 `
-    : "(Pipeline B Single-shot not provided)"
+    : "(Pipeline B Gemini not provided)"
 }
 
 Evaluation Criteria:
-1. Completeness (1-10): Were all durable, important facts extracted from worthy chunks without omissions?
-2. Noise Filtration (1-10): Did the system correctly filter out trivial filler (greetings, weather, small talk) without polluting the knowledge base?
-3. Mutation Accuracy (1-10):
-   - Correct APPEND (1-10): Did it cleanly add novel facts without overwriting other records or creating duplicates?
-   - Correct SUPERSEDE (1-10): Did it accurately supersede outdated or contradicted facts (e.g. auth migration from session cookies to JWT RS256, Project Nexus planning to launch, rate limiting policy update from 500 to 1000 rpm) by referencing the correct target memory ID?
-   - Correct LINK (1-10): Did it link complementary non-conflicting memories about the same entity/topic instead of overwriting?
+1. Chunk Classification (1-10): Were boilerplate and noise chunks correctly dropped, and meaningful chunks passed?
+2. Memory Generation (1-10): Were all durable, important facts accurately extracted as atomic memories from the passed chunks?
+3. Mutation Accuracy (1-10): Did it correctly decide between Append, Extend, Supersede, and Unrelated?
+   - Append: Novel facts without overwriting.
+   - Extend: Added details related to existing facts.
+   - Supersede: Updated/replaced outdated facts with the correct target memory ID.
+   - Unrelated: Skipped linking when there's no semantic relationship.
 
-Evaluate the provided pipeline(s) with high rigor, ensuring you inspect whether each chunk's candidate memories were properly handled. Return the structured JSON scorecard.`;
+Evaluate the provided pipeline(s) with high rigor, ensuring you inspect whether each chunk was properly handled. Return the structured JSON scorecard.`;
 
-    console.log(`[Evaluation Judge] Running Gemini 3.8 Flash evaluation with full chunk diagnostics...`);
-    const start = Date.now();
+    const start = performance.now();
     const result = await model.generateContent(prompt);
-    const latencyMs = Date.now() - start;
-    console.log(`[Evaluation Judge] Completed evaluation in ${latencyMs}ms`);
+    const latencyMs = performance.now() - start;
 
     const parsed = JSON.parse(result.response.text());
 

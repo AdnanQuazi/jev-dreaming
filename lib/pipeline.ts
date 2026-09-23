@@ -2,18 +2,19 @@ import { v4 as uuidv4 } from "uuid";
 import type {
   Chunk,
   Memory,
+  MemoryLink,
   MutationAction,
   PipelineRunResult,
   PipelineEvent,
   StageMetrics,
   JevTriageResult,
   JevMutationResult,
-  ExtractedMemory,
+  ChunkDiagnosticContext,
 } from "@/types";
 
 import { calcJevCost, calcGeminiCost } from "@/types";
-import { runParallelJevTriage, runJevMutationJudge } from "@/lib/jev";
-import { extractMemoryWithGemini, runGeminiSingleShot } from "@/lib/gemini";
+import { runBatchJevClassifier, runJevMutationJudge } from "@/lib/jev";
+import { extractMemoriesFromChunks, runGeminiMutationJudge } from "@/lib/gemini";
 import { retrieveRelatedMemories } from "@/lib/retrieval";
 import {
   getActiveMemories,
@@ -24,332 +25,203 @@ import {
 
 type PipelineCallback = (event: PipelineEvent) => void;
 
-import { DEFAULT_PIPELINE_OPTIONS } from "@/types";
-import type { PipelineOptions, ChunkDiagnosticContext } from "@/types";
+// ─── DREAMING PIPELINE (Jev Classifier -> Gemini Gen -> Jev Mutation) ────────
 
-// ─── JEV + GEMINI PIPELINE ───────────────────────────────────────────────────
-
-export async function runJevPipeline(
+export async function runDreamingPipeline(
   chunks: Chunk[],
   geminiModel: string,
   onEvent: PipelineCallback,
-  options: PipelineOptions = DEFAULT_PIPELINE_OPTIONS
+  commitToDb: boolean = false
 ): Promise<PipelineRunResult> {
   const stages: StageMetrics[] = [];
-  const triageResults: JevTriageResult[] = [];
   const extractedMemories: Memory[] = [];
+  const generatedLinks: MemoryLink[] = [];
   const mutationResults: JevMutationResult[] = [];
   const chunkDiagnostics: ChunkDiagnosticContext[] = [];
-  const runStart = Date.now();
+  const runStart = performance.now();
 
   try {
-    // ── Stage 1: Jev Parallel Triage (Knowledge & Relations) ─────────────────
-    onEvent({ type: "stage_start", stage: "Jev Parallel Triage (Score & Delta)" });
-
-    const allMemories = await getActiveMemories();
-    const relatedMemoriesMap = retrieveRelatedMemories(chunks, allMemories, 5);
-
-    const triage = await runParallelJevTriage(chunks, relatedMemoriesMap, {
-      gateMemories: options.gateMemories,
-    });
-    triageResults.push(...triage.results);
-
-    // Emit per-chunk evaluation events
-    for (const r of triage.results) {
-      const candidates = relatedMemoriesMap[r.chunkId] || [];
+    // ── Stage 1: Jev Batch Classifier ────────────────────────────────────────
+    onEvent({ type: "stage_start", stage: "Stage 1: Jev Classifier" });
+    const triage = await runBatchJevClassifier(chunks);
+    const triageResults = triage.results;
+    
+    // Emit chunk results
+    for (const r of triageResults) {
       onEvent({
         type: "chunk_result",
         chunkId: r.chunkId,
         knowledgeProbability: r.knowledgeProbability,
         passedGate: r.passedGate,
-        forwardedCount: r.forwardedMemoryIds.length,
-        totalCandidates: candidates.length,
-        worthinessScore: r.worthinessScore ?? Math.round(r.knowledgeProbability * 3 * 10) / 10,
-        deltaProbability: r.deltaProbability ?? r.knowledgeProbability,
-        hasContradiction: false,
-        contradictionProbability: 0,
+        forwardedCount: r.passedGate ? 1 : 0, // Mock for UI
+        totalCandidates: 0,
       });
     }
 
     const stage1Metrics: StageMetrics = {
-      name: "Jev Parallel Triage (Score & Delta)",
-      latencyMs: triage.parallelLatencyMs,
-      inputTokens: triage.totalInputTokens,
-      outputTokens: triage.totalOutputTokens,
-      costUsd: calcJevCost(triage.totalInputTokens),
+      name: "Stage 1: Jev Classifier",
+      latencyMs: triage.latencyMs,
+      inputTokens: triage.inputTokens,
+      outputTokens: triage.outputTokens,
+      costUsd: calcJevCost(triage.inputTokens),
     };
     stages.push(stage1Metrics);
     onEvent({ type: "stage_complete", stage: stage1Metrics.name, metrics: stage1Metrics });
 
-    // Filter to chunks that passed the gate (contains_memorable_knowledge >= 0.4)
-    const passedResults = triage.results.filter((r) => r.passedGate);
-    const passedChunks = chunks.filter((c) => passedResults.some((r) => r.chunkId === c.id));
+    const passedChunks = chunks.filter((c) => triageResults.find(r => r.chunkId === c.id)?.passedGate);
 
     if (passedChunks.length === 0) {
-      const emptyResult = buildResult(
-        "jev-pipeline",
-        stages,
-        triageResults,
-        [],
-        [],
-        runStart,
-        options,
-        []
-      );
+      const emptyResult = buildResult("dreaming-pipeline", stages, triageResults, [], [], runStart, []);
       onEvent({ type: "complete", result: emptyResult });
       return emptyResult;
     }
 
-    // ── Stage 2: Gemini Parallel Extraction ─────────────────────────────────
-    onEvent({ type: "stage_start", stage: "Gemini Parallel Extraction" });
-
-    // For each passed chunk, get candidate memories to forward (gated vs all)
-    const memoriesToSendPerChunk: Record<number, Memory[]> = {};
-    for (const chunk of passedChunks) {
-      const candidates = relatedMemoriesMap[chunk.id] || [];
-      const tr = triage.results.find((r) => r.chunkId === chunk.id);
-      if (options.gateMemories && tr) {
-        memoriesToSendPerChunk[chunk.id] = candidates.filter((m) =>
-          tr.forwardedMemoryIds.includes(m.id)
-        );
-      } else {
-        memoriesToSendPerChunk[chunk.id] = candidates;
-      }
-    }
-
-    const extractionResults = await Promise.all(
-      passedChunks.map(async (chunk) => {
-        const candidateMems = memoriesToSendPerChunk[chunk.id] || [];
-        return extractMemoryWithGemini(
-          chunk,
-          candidateMems,
-          geminiModel,
-          options.mutationStrategy
-        );
-      })
-    );
-
-    let geminiInputTokens = 0;
-    let geminiOutputTokens = 0;
-    let geminiMaxLatency = 0;
-    const validExtractions: Array<{ chunkId: number; mem: ExtractedMemory }> = [];
-
-    for (let i = 0; i < passedChunks.length; i++) {
-      const { extraction, inputTokens, outputTokens, latencyMs } = extractionResults[i];
-      geminiInputTokens += inputTokens;
-      geminiOutputTokens += outputTokens;
-      geminiMaxLatency = Math.max(geminiMaxLatency, latencyMs);
-
-      if (extraction) {
-        validExtractions.push({ chunkId: passedChunks[i].id, mem: extraction });
-        onEvent({
-          type: "extraction_result",
-          chunkId: extraction.chunkId,
-          memory: extraction.content,
-          memType: extraction.type,
-        });
-      }
+    // ── Stage 2: Gemini Memory Generation ────────────────────────────────────
+    onEvent({ type: "stage_start", stage: "Stage 2: Gemini Generation" });
+    const extraction = await extractMemoriesFromChunks(passedChunks, geminiModel);
+    
+    for (const mem of extraction.memories) {
+      onEvent({
+        type: "extraction_result",
+        chunkId: mem.chunkId,
+        memory: mem.content,
+        memType: mem.type,
+      });
     }
 
     const stage2Metrics: StageMetrics = {
-      name: "Gemini Parallel Extraction",
-      latencyMs: geminiMaxLatency,
-      inputTokens: geminiInputTokens,
-      outputTokens: geminiOutputTokens,
-      costUsd: calcGeminiCost(geminiModel, geminiInputTokens, geminiOutputTokens),
+      name: "Stage 2: Gemini Generation",
+      latencyMs: extraction.latencyMs,
+      inputTokens: extraction.inputTokens,
+      outputTokens: extraction.outputTokens,
+      costUsd: calcGeminiCost(geminiModel, extraction.inputTokens, extraction.outputTokens),
     };
     stages.push(stage2Metrics);
     onEvent({ type: "stage_complete", stage: stage2Metrics.name, metrics: stage2Metrics });
 
-    // ── Stage 3: Mutation Handling (Jev Judge vs Gemini In-Extraction) ───────
-    const newMemoryObjects = validExtractions.map(({ mem }) => ({
+    // ── Stage 3: Jev Mutation Judge ──────────────────────────────────────────
+    onEvent({ type: "stage_start", stage: "Stage 3: Jev Mutation Judge" });
+    
+    const allMemories = await getActiveMemories();
+    const newMemoryObjects = extraction.memories.map(mem => ({
       id: uuidv4(),
       content: mem.content,
       type: mem.type,
+      chunkId: mem.chunkId,
+      confidence: mem.confidence
     }));
 
-    const existingMemoriesPerNew: Record<string, Memory[]> = {};
-    for (let i = 0; i < validExtractions.length; i++) {
-      const { chunkId } = validExtractions[i];
-      existingMemoriesPerNew[newMemoryObjects[i].id] = memoriesToSendPerChunk[chunkId] || [];
+    let mutationInputTokens = 0;
+    let mutationOutputTokens = 0;
+    let mutationMaxLatency = 0;
+
+    const mutationTasks = newMemoryObjects.map(async (nm) => {
+      // Create mock chunk for retrieval
+      const mockChunk = { id: nm.chunkId, text: nm.content };
+      const relatedMems = retrieveRelatedMemories([mockChunk], allMemories, 5)[nm.chunkId] || [];
+      const mutRes = await runJevMutationJudge({ id: nm.id, content: nm.content }, relatedMems);
+      return { nm, mutRes, relatedMems };
+    });
+
+    const mutationTaskResults = await Promise.all(mutationTasks);
+
+    for (const task of mutationTaskResults) {
+      mutationInputTokens += task.mutRes.inputTokens;
+      mutationOutputTokens += task.mutRes.outputTokens;
+      mutationMaxLatency = Math.max(mutationMaxLatency, task.mutRes.latencyMs);
+      mutationResults.push(...task.mutRes.results);
     }
 
-    if (options.mutationStrategy === "jev") {
-      onEvent({ type: "stage_start", stage: "Jev Mutation Judge" });
-
-      const mutationJudge = await runJevMutationJudge(newMemoryObjects, existingMemoriesPerNew);
-      mutationResults.push(...mutationJudge.results);
-
-      const stage3Metrics: StageMetrics = {
-        name: "Jev Mutation Judge",
-        latencyMs: mutationJudge.latencyMs,
-        inputTokens: mutationJudge.inputTokens,
-        outputTokens: mutationJudge.outputTokens,
-        costUsd: calcJevCost(mutationJudge.inputTokens),
-      };
-      stages.push(stage3Metrics);
-      onEvent({ type: "stage_complete", stage: stage3Metrics.name, metrics: stage3Metrics });
-    } else {
-      // Gemini In-Extraction mutation: mutations already returned by Gemini in Stage 2!
-      for (let i = 0; i < validExtractions.length; i++) {
-        const { mem } = validExtractions[i];
-        const newMemId = newMemoryObjects[i].id;
-        const action = mem.suggestedAction || "APPEND";
-        const targetMemoryId = mem.targetMemoryId || "";
-
-        mutationResults.push({
-          newMemoryId: newMemId,
-          existingMemoryId: targetMemoryId,
-          action,
-          confidence: mem.confidence,
-        });
-      }
-
-      const stage3Metrics: StageMetrics = {
-        name: "Gemini In-Extraction Mutation (Combined in Stage 2)",
-        latencyMs: 0,
-        inputTokens: 0,
-        outputTokens: 0,
-        costUsd: 0,
-      };
-      stages.push(stage3Metrics);
-      onEvent({ type: "stage_complete", stage: stage3Metrics.name, metrics: stage3Metrics });
-    }
+    const stage3Metrics: StageMetrics = {
+      name: "Stage 3: Jev Mutation Judge",
+      latencyMs: mutationMaxLatency,
+      inputTokens: mutationInputTokens,
+      outputTokens: mutationOutputTokens,
+      costUsd: calcJevCost(mutationInputTokens),
+    };
+    stages.push(stage3Metrics);
+    onEvent({ type: "stage_complete", stage: stage3Metrics.name, metrics: stage3Metrics });
 
     // ── Apply mutations to IndexedDB ─────────────────────────────────────────
-    for (let i = 0; i < newMemoryObjects.length; i++) {
-      const nm = newMemoryObjects[i];
-      const ext = validExtractions[i];
-      const existingMems = existingMemoriesPerNew[nm.id] || [];
-
+    for (const task of mutationTaskResults) {
+      const nm = task.nm;
+      const muts = task.mutRes.results;
+      
       const newMemory: Memory = {
         id: nm.id,
         content: nm.content,
         type: nm.type,
         status: "active",
-        sourceChunkId: ext.chunkId,
-        confidence: ext.mem.confidence,
+        sourceChunkId: nm.chunkId,
+        confidence: nm.confidence,
         createdAt: Date.now(),
       };
 
-      const pairsForThisNew = mutationResults.filter((r) => r.newMemoryId === nm.id);
+      let actionTaken = false;
 
-      let primaryAction: MutationAction = "APPEND";
-      let supersededId: string | undefined;
-
-      for (const pair of pairsForThisNew) {
-        const existingMem = existingMems.find((m) => m.id === pair.existingMemoryId);
-        if (pair.action === "SUPERSEDE") {
-          primaryAction = "SUPERSEDE";
-          supersededId = pair.existingMemoryId;
-          onEvent({
-            type: "mutation_result",
-            action: "SUPERSEDE",
-            newContent: nm.content,
-            existingContent: existingMem?.content,
-          });
-        } else if (pair.action === "LINK" && primaryAction === "APPEND") {
-          primaryAction = "LINK";
-          onEvent({
-            type: "mutation_result",
-            action: "LINK",
-            newContent: nm.content,
-            existingContent: existingMem?.content,
-          });
-        }
-      }
-
-      const resolvedMutTarget = supersededId
-        ? allMemories.find((m) => m.id === supersededId) || existingMems.find((m) => m.id === supersededId)
-        : undefined;
-
-      if (primaryAction === "APPEND") {
-        onEvent({ type: "mutation_result", action: "APPEND", newContent: nm.content });
-        await appendMemory(newMemory);
-        if (!mutationResults.some((r) => r.newMemoryId === nm.id)) {
-          mutationResults.push({
-            newMemoryId: nm.id,
-            existingMemoryId: "",
-            action: "APPEND",
-            confidence: ext.mem.confidence,
-          });
-        }
-      } else if (primaryAction === "SUPERSEDE" && supersededId) {
-        await supersede(supersededId, newMemory);
+      // Handle Supersede first (highest priority)
+      const supersedeMut = muts.find(m => m.action === "SUPERSEDE");
+      if (supersedeMut) {
+        onEvent({ type: "mutation_result", action: "SUPERSEDE", newContent: nm.content });
+        if (commitToDb) await supersede(supersedeMut.existingMemoryId, newMemory);
+        actionTaken = true;
       } else {
-        await appendMemory(newMemory);
-        for (const pair of pairsForThisNew) {
-          if (pair.action === "LINK" && pair.existingMemoryId) {
-            await createLink({
+        // Handle Extend
+        const extendMuts = muts.filter(m => m.action === "EXTEND");
+        if (extendMuts.length > 0) {
+          onEvent({ type: "mutation_result", action: "EXTEND", newContent: nm.content });
+          if (commitToDb) await appendMemory(newMemory);
+          for (const ext of extendMuts) {
+            const link: MemoryLink = {
               id: uuidv4(),
               fromId: nm.id,
-              toId: pair.existingMemoryId,
+              toId: ext.existingMemoryId,
               relation: "related",
               createdAt: Date.now(),
-            });
+            };
+            if (commitToDb) await createLink(link);
+            generatedLinks.push(link);
+          }
+          actionTaken = true;
+        } else {
+          // Handle Append
+          const appendMut = muts.find(m => m.action === "APPEND");
+          if (appendMut || muts.length === 0 || muts.every(m => m.action === "UNRELATED")) {
+            onEvent({ type: "mutation_result", action: "APPEND", newContent: nm.content });
+            if (commitToDb) await appendMemory(newMemory);
+            actionTaken = true;
           }
         }
       }
 
-      extractedMemories.push(newMemory);
+      if (actionTaken) {
+        extractedMemories.push(newMemory);
+      }
     }
 
     // ── Build diagnostic alignment context for Evaluation Judge ──────────────
     for (const chunk of chunks) {
       const tr = triageResults.find((r) => r.chunkId === chunk.id);
-      const ext = validExtractions.find((e) => e.chunkId === chunk.id);
-      const nmIndex = validExtractions.findIndex((e) => e.chunkId === chunk.id);
-      const nm = nmIndex >= 0 ? newMemoryObjects[nmIndex] : undefined;
-      const mutation = nm ? mutationResults.find((r) => r.newMemoryId === nm.id && r.action !== "APPEND") || mutationResults.find((r) => r.newMemoryId === nm.id) : undefined;
-      const targetMem = mutation?.existingMemoryId
-        ? allMemories.find((m) => m.id === mutation.existingMemoryId)
-        : undefined;
-
-      const candidates = (relatedMemoriesMap[chunk.id] || []).map((m) => ({
-        id: m.id,
-        content: m.content,
-        type: m.type,
-      }));
-
-      const relationChoices: Record<string, "related" | "unrelated"> = {};
-      if (tr?.memoryRelations) {
-        for (const [memId, rel] of Object.entries(tr.memoryRelations)) {
-          relationChoices[memId] = rel.choice;
-        }
-      }
-
-      // If chunk passed and memory was extracted, it was durably saved to IndexedDB (as APPEND, SUPERSEDE, or LINK)
-      let resolvedMutation: ChunkDiagnosticContext["resolvedMutation"] = undefined;
-      if (ext) {
-        resolvedMutation = {
-          action: mutation?.action || "APPEND",
-          targetMemoryId: mutation?.existingMemoryId || undefined,
-          targetMemoryContent: targetMem?.content,
-        };
-      }
+      const memsForChunk = extractedMemories.filter(m => m.sourceChunkId === chunk.id);
+      const mutsForChunk = mutationResults.filter(r => memsForChunk.some(m => m.id === r.newMemoryId));
 
       chunkDiagnostics.push({
         chunkId: chunk.id,
         chunkText: chunk.text,
-        candidateMemories: candidates,
-        forwardedMemoryIds: tr?.forwardedMemoryIds || [],
-        relationChoices: Object.keys(relationChoices).length > 0 ? relationChoices : undefined,
         passedGate: tr?.passedGate ?? false,
-        extractedMemory: ext ? { content: ext.mem.content, type: ext.mem.type, confidence: ext.mem.confidence } : undefined,
-        resolvedMutation,
+        extractedMemory: memsForChunk.length > 0 ? { content: memsForChunk[0].content, type: memsForChunk[0].type, confidence: memsForChunk[0].confidence } : undefined,
+        resolvedMutations: mutsForChunk.map(m => {
+          const targetMem = allMemories.find(x => x.id === m.existingMemoryId);
+          return {
+            action: m.action,
+            targetMemoryId: m.existingMemoryId,
+            targetMemoryContent: targetMem?.content
+          };
+        }),
       });
     }
 
-    const result = buildResult(
-      "jev-pipeline",
-      stages,
-      triageResults,
-      extractedMemories,
-      mutationResults,
-      runStart,
-      options,
-      chunkDiagnostics
-    );
+    const result = buildResult("dreaming-pipeline", stages, triageResults, extractedMemories, generatedLinks, mutationResults, runStart, chunkDiagnostics);
     onEvent({ type: "complete", result });
     return result;
   } catch (err) {
@@ -358,102 +230,170 @@ export async function runJevPipeline(
   }
 }
 
-// ─── GEMINI SINGLE-SHOT PIPELINE ─────────────────────────────────────────────
+// ─── GEMINI COMPARISON PIPELINE ──────────────────────────────────────────────
 
-export async function runGeminiSingleShotPipeline(
+export async function runGeminiComparisonPipeline(
   chunks: Chunk[],
   geminiModel: string,
-  onEvent: PipelineCallback
+  onEvent: PipelineCallback,
+  commitToDb: boolean = false
 ): Promise<PipelineRunResult> {
   const stages: StageMetrics[] = [];
-  const runStart = Date.now();
+  const extractedMemories: Memory[] = [];
+  const generatedLinks: MemoryLink[] = [];
+  const mutationResults: JevMutationResult[] = [];
+  const chunkDiagnostics: ChunkDiagnosticContext[] = [];
+  const runStart = performance.now();
 
-  onEvent({ type: "stage_start", stage: "Gemini Single-shot (All-in-One)" });
-  const allMemories = await getActiveMemories();
-  const { memories, filteredChunkIds, inputTokens, outputTokens, latencyMs } =
-    await runGeminiSingleShot(chunks, allMemories, geminiModel);
+  try {
+    // ── Stage 1+2: Gemini Memory Generation (All Chunks) ─────────────────────
+    onEvent({ type: "stage_start", stage: "Stage 1+2: Gemini Generation" });
+    const extraction = await extractMemoriesFromChunks(chunks, geminiModel);
+    
+    for (const mem of extraction.memories) {
+      onEvent({
+        type: "extraction_result",
+        chunkId: mem.chunkId,
+        memory: mem.content,
+        memType: mem.type,
+      });
+    }
 
-  const stageMetrics: StageMetrics = {
-    name: "Gemini Single-shot (All-in-One)",
-    latencyMs,
-    inputTokens,
-    outputTokens,
-    costUsd: calcGeminiCost(geminiModel, inputTokens, outputTokens),
-  };
-  stages.push(stageMetrics);
-  onEvent({ type: "stage_complete", stage: stageMetrics.name, metrics: stageMetrics });
-
-  const extractedMemories: Memory[] = memories.map((m) => ({
-    id: uuidv4(),
-    content: m.content,
-    type: m.type,
-    status: "active" as const,
-    sourceChunkId: m.chunkId,
-    confidence: m.confidence,
-    createdAt: Date.now(),
-  }));
-
-  // Map dummy triage results for UI display
-  const triageResults: JevTriageResult[] = chunks.map((c) => {
-    const isFiltered = filteredChunkIds.includes(c.id);
-    return {
-      chunkId: c.id,
-      knowledgeProbability: isFiltered ? 0.1 : 0.9,
-      worthinessScore: isFiltered ? 0 : 3,
-      hasMemoryDelta: !isFiltered,
-      deltaProbability: isFiltered ? 0.1 : 0.9,
-      hasContradiction: false,
-      contradictionProbability: 0.0,
-      passedGate: !isFiltered,
-      reason: isFiltered ? "Discarded by single-shot Gemini prompt" : "Extracted by single-shot Gemini prompt",
-      candidateMemoryIds: [],
-      forwardedMemoryIds: [],
+    const stage12Metrics: StageMetrics = {
+      name: "Stage 1+2: Gemini Generation",
+      latencyMs: extraction.latencyMs,
+      inputTokens: extraction.inputTokens,
+      outputTokens: extraction.outputTokens,
+      costUsd: calcGeminiCost(geminiModel, extraction.inputTokens, extraction.outputTokens),
     };
-  });
+    stages.push(stage12Metrics);
+    onEvent({ type: "stage_complete", stage: stage12Metrics.name, metrics: stage12Metrics });
 
-  const mutationResults: JevMutationResult[] = memories
-    .filter((m) => m.suggestedAction && m.targetMemoryId)
-    .map((m) => ({
-      newMemoryId: uuidv4(),
-      existingMemoryId: m.targetMemoryId!,
-      action: m.suggestedAction!,
-      confidence: m.confidence,
+    // ── Stage 3: Gemini Mutation Judge ───────────────────────────────────────
+    onEvent({ type: "stage_start", stage: "Stage 3: Gemini Mutation Judge" });
+    
+    const allMemories = await getActiveMemories();
+    const newMemoryObjects = extraction.memories.map(mem => ({
+      id: uuidv4(),
+      content: mem.content,
+      type: mem.type,
+      chunkId: mem.chunkId,
+      confidence: mem.confidence
     }));
 
-  const chunkDiagnostics: ChunkDiagnosticContext[] = chunks.map((c) => {
-    const isFiltered = filteredChunkIds.includes(c.id);
-    const mem = memories.find((m) => m.chunkId === c.id);
-    const mut = mutationResults.find((mr) => mr.existingMemoryId && mem?.targetMemoryId === mr.existingMemoryId);
-    const targetMem = mut ? allMemories.find((m) => m.id === mut.existingMemoryId) : undefined;
-    return {
-      chunkId: c.id,
-      chunkText: c.text,
-      candidateMemories: allMemories.map((m) => ({ id: m.id, content: m.content, type: m.type })),
-      forwardedMemoryIds: allMemories.map((m) => m.id),
-      passedGate: !isFiltered,
-      extractedMemory: mem ? { content: mem.content, type: mem.type, confidence: mem.confidence } : undefined,
-      resolvedMutation: mut
-        ? {
-            action: mut.action,
-            targetMemoryId: mut.existingMemoryId,
-            targetMemoryContent: targetMem?.content,
-          }
-        : undefined,
-    };
-  });
+    let mutationInputTokens = 0;
+    let mutationOutputTokens = 0;
+    let mutationMaxLatency = 0;
 
-  const result = buildResult(
-    "gemini-singleshot",
-    stages,
-    triageResults,
-    extractedMemories,
-    mutationResults,
-    runStart,
-    undefined,
-    chunkDiagnostics
-  );
-  onEvent({ type: "complete", result });
-  return result;
+    const mutationTasks = newMemoryObjects.map(async (nm) => {
+      const mockChunk = { id: nm.chunkId, text: nm.content };
+      const relatedMems = retrieveRelatedMemories([mockChunk], allMemories, 5)[nm.chunkId] || [];
+      const mutRes = await runGeminiMutationJudge({ id: nm.id, content: nm.content }, relatedMems, geminiModel);
+      return { nm, mutRes, relatedMems };
+    });
+
+    const mutationTaskResults = await Promise.all(mutationTasks);
+
+    for (const task of mutationTaskResults) {
+      mutationInputTokens += task.mutRes.inputTokens;
+      mutationOutputTokens += task.mutRes.outputTokens;
+      mutationMaxLatency = Math.max(mutationMaxLatency, task.mutRes.latencyMs);
+      mutationResults.push(...task.mutRes.results);
+    }
+
+    const stage3Metrics: StageMetrics = {
+      name: "Stage 3: Gemini Mutation Judge",
+      latencyMs: mutationMaxLatency,
+      inputTokens: mutationInputTokens,
+      outputTokens: mutationOutputTokens,
+      costUsd: calcGeminiCost(geminiModel, mutationInputTokens, mutationOutputTokens),
+    };
+    stages.push(stage3Metrics);
+    onEvent({ type: "stage_complete", stage: stage3Metrics.name, metrics: stage3Metrics });
+
+    // ── DB Updates ───────────────────────────────────────────────────────────
+    for (const task of mutationTaskResults) {
+      const nm = task.nm;
+      const muts = task.mutRes.results;
+      
+      const newMemory: Memory = {
+        id: nm.id,
+        content: nm.content,
+        type: nm.type,
+        status: "active",
+        sourceChunkId: nm.chunkId,
+        confidence: nm.confidence,
+        createdAt: Date.now(),
+      };
+
+      const supersedeMut = muts.find(m => m.action === "SUPERSEDE");
+      if (supersedeMut) {
+        onEvent({ type: "mutation_result", action: "SUPERSEDE", newContent: nm.content });
+        if (commitToDb) await supersede(supersedeMut.existingMemoryId, newMemory);
+        extractedMemories.push(newMemory);
+      } else {
+        const extendMuts = muts.filter(m => m.action === "EXTEND");
+        if (extendMuts.length > 0) {
+          onEvent({ type: "mutation_result", action: "EXTEND", newContent: nm.content });
+          if (commitToDb) await appendMemory(newMemory);
+          for (const ext of extendMuts) {
+            const link: MemoryLink = {
+              id: uuidv4(),
+              fromId: nm.id,
+              toId: ext.existingMemoryId,
+              relation: "related",
+              createdAt: Date.now(),
+            };
+            if (commitToDb) await createLink(link);
+            generatedLinks.push(link);
+          }
+          extractedMemories.push(newMemory);
+        } else {
+          const appendMut = muts.find(m => m.action === "APPEND");
+          if (appendMut || muts.length === 0 || muts.every(m => m.action === "UNRELATED")) {
+            onEvent({ type: "mutation_result", action: "APPEND", newContent: nm.content });
+            if (commitToDb) await appendMemory(newMemory);
+            extractedMemories.push(newMemory);
+          }
+        }
+      }
+    }
+
+    // Map dummy triage results for UI display since we didn't filter
+    const triageResults: JevTriageResult[] = chunks.map((c) => ({
+      chunkId: c.id,
+      knowledgeProbability: 1.0,
+      passedGate: true,
+      reason: "All passed (Gemini baseline)",
+    }));
+
+    for (const chunk of chunks) {
+      const memsForChunk = extractedMemories.filter(m => m.sourceChunkId === chunk.id);
+      const mutsForChunk = mutationResults.filter(r => memsForChunk.some(m => m.id === r.newMemoryId));
+
+      chunkDiagnostics.push({
+        chunkId: chunk.id,
+        chunkText: chunk.text,
+        passedGate: true,
+        extractedMemory: memsForChunk.length > 0 ? { content: memsForChunk[0].content, type: memsForChunk[0].type, confidence: memsForChunk[0].confidence } : undefined,
+        resolvedMutations: mutsForChunk.map(m => {
+          const targetMem = allMemories.find(x => x.id === m.existingMemoryId);
+          return {
+            action: m.action,
+            targetMemoryId: m.existingMemoryId,
+            targetMemoryContent: targetMem?.content
+          };
+        }),
+      });
+    }
+
+    const result = buildResult("gemini-pipeline", stages, triageResults, extractedMemories, generatedLinks, mutationResults, runStart, chunkDiagnostics);
+    onEvent({ type: "complete", result });
+    return result;
+  } catch (err) {
+    onEvent({ type: "error", message: String(err) });
+    throw err;
+  }
 }
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
@@ -463,25 +403,25 @@ function buildResult(
   stages: StageMetrics[],
   triageResults: JevTriageResult[],
   extractedMemories: Memory[],
+  generatedLinks: MemoryLink[],
   mutationResults: JevMutationResult[],
   runStart: number,
-  pipelineOptions?: PipelineOptions,
-  chunkDiagnostics?: ChunkDiagnosticContext[]
+  chunkDiagnostics: ChunkDiagnosticContext[]
 ): PipelineRunResult {
   const chunksFiltered = triageResults.filter((r) => !r.passedGate).length;
   const chunksProcessed = triageResults.filter((r) => r.passedGate).length;
   return {
     mode,
     stages,
-    totalLatencyMs: Date.now() - runStart,
+    totalLatencyMs: performance.now() - runStart,
     totalCostUsd: stages.reduce((s, st) => s + st.costUsd, 0),
     memoriesGenerated: extractedMemories.length,
     chunksFiltered,
     chunksProcessed,
     triageResults,
     extractedMemories,
+    generatedLinks,
     mutationResults,
-    pipelineOptions,
     chunkDiagnostics,
     timestamp: Date.now(),
   };

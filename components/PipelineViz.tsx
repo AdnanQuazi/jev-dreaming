@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo } from "react";
-import type { PipelineEvent, StageMetrics, MutationAction } from "@/types";
+import type { PipelineEvent, StageMetrics } from "@/types";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
   Brain,
@@ -32,118 +32,89 @@ interface StageState {
   details: string[];
 }
 
+function getIconForStage(name: string): React.ReactNode {
+  if (name.includes("Classifier")) return <Filter className="w-4 h-4" />;
+  if (name.includes("Gemini Generation")) return <Brain className="w-4 h-4" />;
+  if (name.includes("Mutation")) return <GitMerge className="w-4 h-4" />;
+  if (name.includes("Judge")) return <Sparkles className="w-4 h-4 text-fuchsia-400" />;
+  return <Zap className="w-4 h-4" />;
+}
+
 export function PipelineViz({ events, isRunning, activeStage }: Props) {
   const stageStates = useMemo<StageState[]>(() => {
-    const isSingleShot = events.some(
-      (e) => e.type === "stage_start" && e.stage.includes("Single-shot")
-    );
-
-    let stages: StageState[];
-
-    if (isSingleShot) {
-      stages = [
-        {
-          name: "Gemini Single-shot (All-in-One)",
-          icon: <Brain className="w-4 h-4" />,
-          status: "pending",
-          details: [],
-        },
-        {
-          name: "Gemini 3.8 Flash Quality Judge",
-          icon: <Sparkles className="w-4 h-4 text-fuchsia-400" />,
-          status: "pending",
-          details: [],
-        },
-      ];
-    } else {
-      stages = [
-        {
-          name: "Jev Parallel Triage (Score & Delta)",
-          icon: <Filter className="w-4 h-4" />,
-          status: "pending",
-          details: [],
-        },
-        {
-          name: "Gemini Parallel Extraction",
-          icon: <Brain className="w-4 h-4" />,
-          status: "pending",
-          details: [],
-        },
-        {
-          name: "Jev Mutation Judge",
-          icon: <GitMerge className="w-4 h-4" />,
-          status: "pending",
-          details: [],
-        },
-        {
-          name: "Gemini 3.8 Flash Quality Judge",
-          icon: <Sparkles className="w-4 h-4 text-fuchsia-400" />,
-          status: "pending",
-          details: [],
-        },
-      ];
-    }
+    const stages: StageState[] = [];
 
     for (const event of events) {
       if (event.type === "stage_start") {
         let s = stages.find((st) => st.name === event.stage);
-        if (!s && event.stage.includes("Gemini In-Extraction")) {
-          s = stages.find((st) => st.name === "Jev Mutation Judge");
-          if (s) s.name = "Gemini In-Extraction Mutation";
+        if (!s) {
+          stages.push({
+            name: event.stage,
+            icon: getIconForStage(event.stage),
+            status: "running",
+            details: [],
+          });
+        } else {
+          s.status = "running";
         }
-        if (s) s.status = "running";
       } else if (event.type === "stage_complete") {
         let s = stages.find((st) => st.name === event.stage);
-        if (!s && event.stage.includes("Gemini In-Extraction")) {
-          s = stages.find((st) => st.name === "Jev Mutation Judge" || st.name.includes("Gemini In-Extraction"));
-          if (s) {
-            s.name = "Gemini In-Extraction Mutation";
-            s.details.push("Resolved directly during Stage 2 Gemini extraction");
-          }
-        }
         if (s) {
           s.status = "done";
           s.metrics = event.metrics;
         }
       } else if (event.type === "chunk_result") {
-        const s = stages.find((st) => st.name.includes("Jev Parallel Triage"));
+        const s = stages.find((st) => st.name.includes("Classifier") && st.status !== "done");
         if (s) {
           const statusIcon = event.passedGate ? "✓ Pass" : "✗ Drop";
-          const label = event.knowledgeProbability !== undefined
-            ? `${statusIcon} [Chunk ${event.chunkId + 1}]: Knowledge ${Math.round(event.knowledgeProbability * 100)}% · ${event.forwardedCount ?? 0}/${event.totalCandidates ?? 0} rel mems`
-            : `${statusIcon} [Chunk ${event.chunkId + 1}]: Score ${event.worthinessScore}/3 · Δ ${Math.round((event.deltaProbability ?? 0) * 100)}%`;
-          s.details.push(label);
+          const prob = event.knowledgeProbability !== undefined 
+            ? `${Math.round(event.knowledgeProbability * 100)}%` 
+            : "";
+          s.details.push(`${statusIcon} [Chunk ${event.chunkId + 1}]: ${prob}`);
         }
       } else if (event.type === "extraction_result") {
-        const s = stages.find((st) => st.name === "Gemini Parallel Extraction" || st.status === "running");
+        const s = stages.find((st) => st.name.includes("Generation") && st.status === "running");
         if (s) {
           s.details.push(`Chunk ${event.chunkId + 1} → ${event.memory.slice(0, 55)}...`);
         }
       } else if (event.type === "mutation_result") {
-        const s = stages.find((st) => st.name === "Jev Mutation Judge" || st.status === "running");
+        const s = stages.find((st) => st.name.includes("Mutation") && st.status === "running");
         if (s) {
           const label = `${event.action}: ${event.newContent.slice(0, 50)}...`;
           s.details.push(label);
         }
       } else if (event.type === "evaluation_result") {
-        const s = stages.find((st) => st.name === "Gemini 3.8 Flash Quality Judge");
-        if (s) {
-          s.status = "done";
-          if (event.evaluation.jevEvaluation) {
-            s.details.push(`Jev Score: ${event.evaluation.jevEvaluation.overallScore}/10 (${event.evaluation.jevEvaluation.critique.slice(0, 50)}...)`);
-          }
-          if (event.evaluation.singleShotEvaluation) {
-            s.details.push(`Single-shot Score: ${event.evaluation.singleShotEvaluation.overallScore}/10`);
-          }
+        let s = stages.find((st) => st.name.includes("Quality Judge"));
+        if (!s) {
+          s = {
+            name: "Gemini 3.8 Flash Quality Judge",
+            icon: getIconForStage("Judge"),
+            status: "done",
+            details: [],
+          };
+          stages.push(s);
+        }
+        s.status = "done";
+        if (event.evaluation.jevEvaluation) {
+          s.details.push(`Dreaming Score: ${event.evaluation.jevEvaluation.overallScore.toFixed(1)}/10`);
+        }
+        if (event.evaluation.singleShotEvaluation) {
+          s.details.push(`Gemini Score: ${event.evaluation.singleShotEvaluation.overallScore.toFixed(1)}/10`);
         }
       }
     }
 
     if (activeStage) {
-      for (const s of stages) {
-        if (s.status === "pending" && s.name === activeStage) {
-          s.status = "running";
-        }
+      let s = stages.find((st) => st.name === activeStage);
+      if (!s) {
+        stages.push({
+          name: activeStage,
+          icon: getIconForStage(activeStage),
+          status: "running",
+          details: [],
+        });
+      } else if (s.status === "pending") {
+        s.status = "running";
       }
     }
 
@@ -163,8 +134,8 @@ export function PipelineViz({ events, isRunning, activeStage }: Props) {
   const supersedeCount = events.filter(
     (e) => e.type === "mutation_result" && e.action === "SUPERSEDE"
   ).length;
-  const linkCount = events.filter(
-    (e) => e.type === "mutation_result" && e.action === "LINK"
+  const extendCount = events.filter(
+    (e) => e.type === "mutation_result" && (e.action === "EXTEND" || e.action === "LINK")
   ).length;
 
   return (
@@ -206,9 +177,9 @@ export function PipelineViz({ events, isRunning, activeStage }: Props) {
                 ⇒ {supersedeCount} supersede
               </span>
             )}
-            {linkCount > 0 && (
+            {extendCount > 0 && (
               <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-none bg-purple-500/10 border border-purple-500/20 text-purple-300 text-xs">
-                ⟷ {linkCount} link
+                ⟷ {extendCount} extend
               </span>
             )}
           </div>
@@ -217,7 +188,7 @@ export function PipelineViz({ events, isRunning, activeStage }: Props) {
         {/* Stages list */}
         <div className="space-y-2">
           {stageStates.map((stage, idx) => (
-            <div key={stage.name}>
+            <div key={idx}>
               <div
                 className={`rounded-none border transition-all duration-300 ${
                   stage.status === "running"
@@ -268,15 +239,15 @@ export function PipelineViz({ events, isRunning, activeStage }: Props) {
                 {/* Stage details */}
                 {stage.details.length > 0 && (
                   <div className="px-8 pb-2 space-y-0.5">
-                    {stage.details.slice(0, 8).map((detail, i) => (
+                    {stage.details.slice(0, 10).map((detail, i) => (
                       <div key={i} className="text-xs text-white/50 truncate font-mono">
                         <ChevronRight className="w-2.5 h-2.5 inline mr-1 text-white/20" />
                         {detail}
                       </div>
                     ))}
-                    {stage.details.length > 8 && (
+                    {stage.details.length > 10 && (
                       <div className="text-xs text-white/30 pl-3">
-                        +{stage.details.length - 8} more
+                        +{stage.details.length - 10} more
                       </div>
                     )}
                   </div>

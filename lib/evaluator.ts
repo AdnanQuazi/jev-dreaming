@@ -3,8 +3,8 @@ import type { Chunk, Memory, PipelineRunResult, EvaluationJudgeResult } from "@/
 export async function runQualityEvaluation(
   chunks: Chunk[],
   existingMemories: Memory[],
-  jevResult?: PipelineRunResult,
-  singleShotResult?: PipelineRunResult
+  dreamingResult?: PipelineRunResult,
+  geminiResult?: PipelineRunResult
 ): Promise<EvaluationJudgeResult | null> {
   try {
     const res = await fetch("/api/evaluate", {
@@ -13,8 +13,8 @@ export async function runQualityEvaluation(
       body: JSON.stringify({
         chunks,
         existingMemories,
-        jevResult,
-        singleShotResult,
+        dreamingResult,
+        geminiResult,
       }),
     });
 

@@ -1,12 +1,22 @@
 import { NextRequest, NextResponse } from "next/server";
 import { TypeSafeClient } from "@typesafe-ai/sdk";
 
+import https from "https";
+
 const apiKey = process.env.TYPESAFE_API_KEY;
 let client: TypeSafeClient | null = null;
 
+const keepAliveAgent = new https.Agent({ keepAlive: true });
+
 function getClient(): TypeSafeClient {
   if (!client) {
-    client = new TypeSafeClient({ apiKey });
+    client = new TypeSafeClient({ 
+      apiKey,
+      fetch: (url: RequestInfo | URL, init?: RequestInit) => {
+        // @ts-ignore - inject custom agent for keep-alive
+        return fetch(url, { ...init, agent: keepAliveAgent });
+      }
+    });
   }
   return client;
 }
