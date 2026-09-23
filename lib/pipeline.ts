@@ -25,7 +25,7 @@ import {
 
 type PipelineCallback = (event: PipelineEvent) => void;
 
-// ─── DREAMING PIPELINE (Jev Classifier -> Gemini Gen -> Jev Mutation) ────────
+// ─── WITH JEV PIPELINE (Jev Classifier -> Gemini Gen -> Jev Mutation) ────────
 
 export async function runDreamingPipeline(
   chunks: Chunk[],
@@ -71,7 +71,7 @@ export async function runDreamingPipeline(
     const passedChunks = chunks.filter((c) => triageResults.find(r => r.chunkId === c.id)?.passedGate);
 
     if (passedChunks.length === 0) {
-      const emptyResult = buildResult("dreaming-pipeline", stages, triageResults, [], [], [], runStart, []);
+      const emptyResult = buildResult("with-jev", stages, triageResults, [], [], [], runStart, []);
       onEvent({ type: "complete", result: emptyResult });
       return emptyResult;
     }
@@ -221,7 +221,7 @@ export async function runDreamingPipeline(
       });
     }
 
-    const result = buildResult("dreaming-pipeline", stages, triageResults, extractedMemories, generatedLinks, mutationResults, runStart, chunkDiagnostics);
+    const result = buildResult("with-jev", stages, triageResults, extractedMemories, generatedLinks, mutationResults, runStart, chunkDiagnostics);
     onEvent({ type: "complete", result });
     return result;
   } catch (err) {
@@ -387,7 +387,7 @@ export async function runGeminiComparisonPipeline(
       });
     }
 
-    const result = buildResult("gemini-pipeline", stages, triageResults, extractedMemories, generatedLinks, mutationResults, runStart, chunkDiagnostics);
+    const result = buildResult("without-jev", stages, triageResults, extractedMemories, generatedLinks, mutationResults, runStart, chunkDiagnostics);
     onEvent({ type: "complete", result });
     return result;
   } catch (err) {

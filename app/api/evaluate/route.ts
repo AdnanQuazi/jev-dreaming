@@ -50,7 +50,7 @@ const evaluationJudgeSchema: Schema = {
     winner: {
       type: SchemaType.STRING,
       format: "enum",
-      enum: ["dreaming-pipeline", "gemini-pipeline", "tie"],
+      enum: ["with-jev", "without-jev", "tie"],
       description: "Overall winning approach.",
     },
   },
@@ -120,7 +120,7 @@ ${existingMemories.map((m) => `- [ID: ${m.id}] [${m.type}] ${m.content}`).join("
 ${
   dreamingResult
     ? `
-=== PIPELINE A: Dreaming Pipeline Results ===
+=== PIPELINE A: With Jev Results ===
 Summary: ${dreamingResult.memoriesGenerated} memories generated, ${dreamingResult.chunksFiltered} chunks dropped.
 
 Per-Chunk Execution Details & Alignments:
@@ -132,7 +132,7 @@ ${formatPipelineDiagnostics(dreamingResult)}
 ${
   geminiResult
     ? `
-=== PIPELINE B: Gemini Pipeline Results ===
+=== PIPELINE B: Without Jev Results ===
 Summary: ${geminiResult.memoriesGenerated} memories generated, ${geminiResult.chunksFiltered} chunks dropped.
 
 Per-Chunk Execution Details & Alignments:

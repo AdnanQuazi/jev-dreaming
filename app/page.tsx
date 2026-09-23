@@ -162,7 +162,7 @@ export default function Home() {
                 },
                 {
                   label: "Memories Active",
-                  value: results["dreaming-pipeline"]?.memoriesGenerated ?? "—",
+                  value: results["with-jev"]?.memoriesGenerated ?? "—",
                   color: "text-fuchsia-400",
                 },
               ].map(({ label, value, color }) => (

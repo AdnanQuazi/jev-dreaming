@@ -82,7 +82,7 @@ export function BenchmarkPanel({
     try {
       const activeMemories = await getActiveMemories();
       const result = await runDreamingPipeline(chunks, selectedModel, handleEvent, true);
-      onResults({ "dreaming-pipeline": result });
+      onResults({ "with-jev": result });
       onRefreshMemories();
 
       // Trigger Gemini 3.8 Flash Evaluation Judge
@@ -115,14 +115,14 @@ export function BenchmarkPanel({
     try {
       const activeMemories = await getActiveMemories();
 
-      // 1. Run Dreaming Pipeline
+      // 1. Run Pipeline (With Jev)
       const dreamingResult = await runDreamingPipeline(chunks, selectedModel, handleEvent, false);
-      allResults["dreaming-pipeline"] = dreamingResult;
+      allResults["with-jev"] = dreamingResult;
       onResults({ ...allResults });
 
-      // 2. Run Gemini Comparison Pipeline
+      // 2. Run Pipeline (Without Jev)
       const geminiResult = await runGeminiComparisonPipeline(chunks, selectedModel, handleEvent, false);
-      allResults["gemini-pipeline"] = geminiResult;
+      allResults["without-jev"] = geminiResult;
       onResults({ ...allResults });
 
       onRefreshMemories();
@@ -228,7 +228,7 @@ export function BenchmarkPanel({
             <div className="flex items-start gap-1.5">
               <ChevronRight className="w-3 h-3 mt-0.5 text-fuchsia-400 shrink-0" />
               <span>
-                <span className="text-white/60 font-medium">Pipeline Mode:</span> Dreaming Pipeline uses Jev for Stage 1 (Triage) and Stage 3 (Mutation). Gemini Pipeline uses Gemini exclusively.
+                <span className="text-white/60 font-medium">Pipeline Mode:</span> With Jev uses Jev for Stage 1 (Triage) and Stage 3 (Mutation). Without Jev uses Gemini exclusively.
               </span>
             </div>
             <div className="flex items-start gap-1.5">

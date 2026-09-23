@@ -110,7 +110,7 @@ export interface EvaluationJudgeResult {
   jevEvaluation?: QualityScorecard;
   singleShotEvaluation?: QualityScorecard;
   comparisonSummary?: string;
-  winner?: "dreaming-pipeline" | "gemini-pipeline" | "tie";
+  winner?: "with-jev" | "without-jev" | "tie";
   evaluatorModel: string;
   latencyMs: number;
 }
@@ -144,7 +144,7 @@ export type PipelineEvent =
 // Pipeline run types
 // ─────────────────────────────────────────────
 
-export type PipelineMode = "dreaming-pipeline" | "gemini-pipeline";
+export type PipelineMode = "with-jev" | "without-jev";
 
 export interface StageMetrics {
   name: string;

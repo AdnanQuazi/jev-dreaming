@@ -67,7 +67,7 @@ export function MemoryViz({ refreshTrigger, results = {} }: Props) {
   };
 
   const hasResults = Object.keys(results).length > 0;
-  const isFullBenchmark = results["dreaming-pipeline"] && results["gemini-pipeline"];
+  const isFullBenchmark = results["with-jev"] && results["without-jev"];
 
   return (
     <div className="space-y-4">
@@ -99,20 +99,20 @@ export function MemoryViz({ refreshTrigger, results = {} }: Props) {
       ) : isFullBenchmark ? (
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <MemoryGraph 
-            {...computeMergedState(results["dreaming-pipeline"]!)} 
-            title="Dreaming Pipeline Output"
+            {...computeMergedState(results["with-jev"]!)} 
+            title="With Jev Output"
             icon={<Zap className="w-4 h-4 text-fuchsia-400" />}
           />
           <MemoryGraph 
-            {...computeMergedState(results["gemini-pipeline"]!)} 
-            title="Gemini Pipeline Output"
+            {...computeMergedState(results["without-jev"]!)} 
+            title="Without Jev Output"
             icon={<Brain className="w-4 h-4 text-blue-400" />}
           />
         </div>
-      ) : results["dreaming-pipeline"] ? (
+      ) : results["with-jev"] ? (
         <MemoryGraph 
-          {...computeMergedState(results["dreaming-pipeline"]!)} 
-          title="Dreaming Pipeline Output"
+          {...computeMergedState(results["with-jev"]!)} 
+          title="With Jev Output"
           icon={<Zap className="w-4 h-4 text-fuchsia-400" />}
         />
       ) : (

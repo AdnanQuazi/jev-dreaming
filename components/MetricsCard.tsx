@@ -25,18 +25,18 @@ interface Props {
 }
 
 const MODE_LABELS: Record<string, string> = {
-  "dreaming-pipeline": "Dreaming Pipeline",
-  "gemini-pipeline": "Gemini Pipeline",
+  "with-jev": "With Jev",
+  "without-jev": "Without Jev",
 };
 
 const MODE_COLORS: Record<string, string> = {
-  "dreaming-pipeline": "text-fuchsia-300 border-fuchsia-500/30 bg-fuchsia-500/10",
-  "gemini-pipeline": "text-blue-300 border-blue-500/30 bg-blue-500/10",
+  "with-jev": "text-fuchsia-300 border-fuchsia-500/30 bg-fuchsia-500/10",
+  "without-jev": "text-blue-300 border-blue-500/30 bg-blue-500/10",
 };
 
 const MODE_ICON: Record<string, React.ReactNode> = {
-  "dreaming-pipeline": <Zap className="w-3.5 h-3.5" />,
-  "gemini-pipeline": <Brain className="w-3.5 h-3.5" />,
+  "with-jev": <Zap className="w-3.5 h-3.5" />,
+  "without-jev": <Brain className="w-3.5 h-3.5" />,
 };
 
 function formatMs(ms: number) {
@@ -50,7 +50,7 @@ function formatCost(cost: number) {
 }
 
 export function MetricsCard({ results, selectedModel, evaluationJudge }: Props) {
-  const modes = ["dreaming-pipeline", "gemini-pipeline"] as const;
+  const modes = ["with-jev", "without-jev"] as const;
   const availableModes = modes.filter((m) => results[m]);
 
   const modelConfig = GEMINI_MODELS.find((m) => m.id === selectedModel);
@@ -216,7 +216,7 @@ export function MetricsCard({ results, selectedModel, evaluationJudge }: Props) 
           </div>
 
           {/* Efficiency advantage banner */}
-          {availableModes.length >= 2 && results["dreaming-pipeline"] && results["gemini-pipeline"] && (
+          {availableModes.length >= 2 && results["with-jev"] && results["without-jev"] && (
             <div className="mt-4 p-3.5 rounded-none bg-white/3 border border-white/8 flex items-center justify-between flex-wrap gap-3">
               <div className="flex items-center gap-2">
                 <TrendingDown className="w-4 h-4 text-emerald-400" />
@@ -224,15 +224,15 @@ export function MetricsCard({ results, selectedModel, evaluationJudge }: Props) 
               </div>
               <div className="flex items-center gap-4 text-sm font-mono text-emerald-400 font-bold">
                 {(() => {
-                  const jevLat = results["dreaming-pipeline"]!.totalLatencyMs;
-                  const gemLat = results["gemini-pipeline"]!.totalLatencyMs;
+                  const jevLat = results["with-jev"]!.totalLatencyMs;
+                  const gemLat = results["without-jev"]!.totalLatencyMs;
                   const speedFactor = gemLat / jevLat;
                   const speedText = speedFactor >= 1 
                     ? `${speedFactor.toFixed(1)}x faster` 
                     : `${(1 / speedFactor).toFixed(1)}x slower`;
 
-                  const jevCost = results["dreaming-pipeline"]!.totalCostUsd;
-                  const gemCost = results["gemini-pipeline"]!.totalCostUsd;
+                  const jevCost = results["with-jev"]!.totalCostUsd;
+                  const gemCost = results["without-jev"]!.totalCostUsd;
                   const costFactor = gemCost / jevCost;
                   const costText = costFactor >= 1 
                     ? `${costFactor.toFixed(1)}x cheaper` 
@@ -281,7 +281,7 @@ export function MetricsCard({ results, selectedModel, evaluationJudge }: Props) 
                 <div className="p-3.5 border border-fuchsia-500/20 bg-fuchsia-950/10 space-y-3">
                   <div className="flex items-center justify-between">
                     <span className="text-sm font-semibold text-fuchsia-300 flex items-center gap-1.5">
-                      <Zap className="w-3.5 h-3.5" /> Dreaming Pipeline Quality
+                      <Zap className="w-3.5 h-3.5" /> With Jev Quality
                     </span>
                     <span className="text-xl font-bold font-mono text-fuchsia-400">
                       {evaluationJudge.jevEvaluation.overallScore.toFixed(1)}/10
@@ -302,7 +302,7 @@ export function MetricsCard({ results, selectedModel, evaluationJudge }: Props) 
                 <div className="p-3.5 border border-blue-500/20 bg-blue-950/10 space-y-3">
                   <div className="flex items-center justify-between">
                     <span className="text-sm font-semibold text-blue-300 flex items-center gap-1.5">
-                      <Brain className="w-3.5 h-3.5" /> Gemini Pipeline Quality
+                      <Brain className="w-3.5 h-3.5" /> Without Jev Quality
                     </span>
                     <span className="text-xl font-bold font-mono text-blue-400">
                       {evaluationJudge.singleShotEvaluation.overallScore.toFixed(1)}/10
